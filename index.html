@@ -740,9 +740,11 @@ async function initApp() {
 function buildRqTermSelect() {
   const sel = document.getElementById('rq-term');
   if (!sel) return;
+  const prev = sel.value; // preserve current selection
   sel.innerHTML = '<option value="">選擇期別</option>' +
     [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate))
               .map(t=>`<option value="${t.id}">${t.name}</option>`).join('');
+  if (prev) sel.value = prev; // restore selection after rebuild
 }
 
 // ── Override sw() to handle new panels ──
@@ -1160,9 +1162,13 @@ function showStudentRegQR() {
 function dlStuQR(){const c=document.getElementById('stu-qr-cv');if(!c)return;const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='學生報名QR.png';a.click();}
 
 function renderRegQR() {
-  // Always rebuild select in case terms changed since load
+  // Read value FIRST before rebuilding (rebuilding resets the selection)
+  const sel = document.getElementById('rq-term');
+  const termId = sel ? sel.value : '';
+  // Rebuild select options while preserving current selection
   buildRqTermSelect();
-  const termId = document.getElementById('rq-term').value;
+  // Restore the selected value after rebuild
+  if (termId && sel) sel.value = termId;
   const pending  = pendingSubs.filter(p=>p.termId===termId&&p.status==='pending');
   const approved = pendingSubs.filter(p=>p.termId===termId&&p.status==='approved');
   const pSec = document.getElementById('reg-pending-section');
