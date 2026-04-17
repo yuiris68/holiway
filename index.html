@@ -2493,6 +2493,7 @@ async function renderCoaches() {
     </div>`;
   }).join('');
 } catch(e){ body.innerHTML='<div style="color:red;padding:20px">教練載入錯誤：'+e.message+'</div>'; console.error('renderCoaches error:',e); }
+}
 
 // ── Report ①: Attendance with sub comparison & fee calc ──────────
 function calcReportAtt() {
