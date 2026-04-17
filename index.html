@@ -1561,8 +1561,18 @@ function renderCoaches() {
   if (!coaches.length) { body.innerHTML='<div class="empty">尚無教練資料</div>'; return; }
   body.innerHTML = coaches.map(c => {
     const sessCount = sessions.filter(s=>s.coach===c.name).length;
-    // total signed-in lessons (present)
-    const presentCount = Object.entries(signinRec).reduce((acc,[key,rec])=>{
+    // Monthly sign-in count (current month only)
+    const now = new Date();
+    const thisMonth = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    const monthPresent = Object.entries(signinRec).reduce((acc,[key,rec])=>{
+      const [sessId, date] = key.split('|');
+      if(!date||!date.startsWith(thisMonth)) return acc;
+      const s = getSess(sessId);
+      if(s&&s.coach===c.name) acc+=Object.values(rec).filter(v=>v==='present').length;
+      return acc;
+    }, 0);
+    // Total all-time present for reference
+    const totalPresent = Object.entries(signinRec).reduce((acc,[key,rec])=>{
       const sessId = key.split('|')[0];
       const s = getSess(sessId);
       if(s&&s.coach===c.name) acc+=Object.values(rec).filter(v=>v==='present').length;
@@ -1573,7 +1583,11 @@ function renderCoaches() {
       <div style="flex:1">
         <div style="font-size:14px;font-weight:500">${c.name} <span class="pill ${c.active?'pill-green':'pill-gray'}" style="font-size:10px">${c.active?'授課中':'停用'}</span></div>
         <div style="font-size:11px;color:#999;margin-top:2px">${c.role||'教練'}${c.phone?' · '+c.phone:''}</div>
-        <div style="font-size:11px;color:#666;margin-top:2px">負責班次：${sessCount} 堂 · 累計出席人次：${presentCount}</div>
+        <div style="font-size:11px;color:#666;margin-top:2px;display:flex;gap:12px;flex-wrap:wrap">
+          <span>負責班次：<strong>${sessCount}</strong> 堂</span>
+          <span style="color:#27500A">本月出席人次：<strong>${monthPresent}</strong></span>
+          <span style="color:#999">累計（全期）：${totalPresent}</span>
+        </div>
         ${c.note?`<div style="font-size:11px;color:#aaa">${c.note}</div>`:''}
       </div>
       <div style="display:flex;gap:6px">
