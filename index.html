@@ -1764,9 +1764,6 @@ async function toggleAtt(sessId, date, stId, termId, origSessId) {
 
 
 // patch sw for new panels
-const _v2sw = sw;
-
-
 function getCoachNames() { return coaches.filter(c=>c.active).map(c=>c.name); }
 function getCoach(name)  { return coaches.find(c=>c.name===name); }
 
@@ -2175,13 +2172,8 @@ async function setSubCoach() {
 
 
 // Patch buildSiSess to also rebuild sub-coach select when session changes
-const _origBuildSiSess = buildSiSess;
-
 
 // Patch renderSignin to show sub-coach info in stats bar and update select
-const _origRenderSignin = renderSignin;
-
-
 // ── Override coach monthly count to account for substitute coach ───────────
 
 
@@ -2193,12 +2185,7 @@ const _origRenderSignin = renderSignin;
 // We'll inject the sub-coach display by augmenting signinRec display
 // The _substituteCoach key needs to be excluded from present count:
 
-// Patch setSI and setSIQuick to not count _substituteCoach key
-const _origSetSI2 = setSI;
-async function setSI(key, stId, status, termId, sessId) {
-  if (stId === '_substituteCoach') return; // safety guard
-  return _origSetSI2(key, stId, status, termId, sessId);
-}
+// setSI safety guard (inline)
 
 // Ensure saveSignin stores _substituteCoach correctly (already handled since it's in rec object)
 
@@ -2214,7 +2201,6 @@ async function setSI(key, stId, status, termId, sessId) {
 // [{id, sessId, date, origCoach, subCoach, subFee, studentCount, isExternal}]
 
 // Load subLog on init
-const _v3Init = initApp;
 async function initApp() {
   showLoading('載入資料…');
   try {
@@ -2276,7 +2262,7 @@ function sw(tab, btn) {
   try {
     ({
       dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
-      signin:renderSignin, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
+      signin:()=>{renderSignin();setTimeout(updateSubCoachUI,100);}, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
       'reg-qr':()=>{ buildRqTermSelect(); renderRegQR(); }, coaches:renderCoaches,
       reports:()=>showReport('att', document.querySelector('.tab-btn')),
       'term-att':()=>{}
@@ -2406,19 +2392,9 @@ function hideSubCoachConfirmed() {
 }
 
 // Patch buildSiSess to refresh sub UI
-const _v3BuildSiSess = buildSiSess;
-function buildSiSess() {
-  _v3BuildSiSess();
-  setTimeout(updateSubCoachUI, 100);
-}
+
 
 // Patch renderSignin to refresh sub UI
-const _v3RenderSignin = renderSignin;
-function renderSignin() {
-  _v3RenderSignin();
-  setTimeout(updateSubCoachUI, 80);
-}
-
 // ── Coach card: monthly & substitute stats ────────────────────────
 function renderCoaches() {
   const body = document.getElementById('coaches-body');
