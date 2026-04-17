@@ -315,6 +315,10 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
       <div class="sh"><h2>學費管理</h2>
         <select id="fee-term-filter" style="width:auto;font-size:12px" onchange="renderFee()"><option value="all">全部期別</option></select>
         <select id="fee-status-filter" style="width:auto;font-size:12px" onchange="renderFee()"><option value="all">全部狀態</option><option value="unpaid">未繳清</option><option value="paid">已繳清</option><option value="overdue">逾期</option><option value="refunded">已退費</option></select>
+        <select id="fee-month-filter" style="width:auto;font-size:12px" onchange="applyMonthFilter()">
+          <option value="">全部月份</option>
+        </select>
+        <button class="btn btn-outline" style="font-size:11px" onclick="setThisMonth()">本月</button>
         <button class="btn btn-pink" style="margin-left:auto" onclick="openIssueFee()">+ 開帳單</button>
       </div>
       <div class="metrics" id="fee-metrics"></div>
@@ -662,20 +666,34 @@ function renderFee(){
   const sF = document.getElementById('fee-status-filter').value;
   let list = [...fees];
   if(tF !== 'all') list = list.filter(f => f.termId === tF);
+  // Apply quick date filter (by issuedDate)
+  const qFrom = document.getElementById('fee-quick-from')?.value || '';
+  const qTo   = document.getElementById('fee-quick-to')?.value   || '';
+  if(qFrom) list = list.filter(f => (f.issuedDate||'') >= qFrom);
+  if(qTo)   list = list.filter(f => (f.issuedDate||'') <= qTo);
+
   const ws = list.map(f => ({f, s: feeStatus(f)}));
   if(sF === 'unpaid')   list = ws.filter(({s}) => s.bal > 0 && !s.refunded).map(({f}) => f);
   else if(sF === 'paid')     list = ws.filter(({s}) => s.bal <= 0 && !s.refunded).map(({f}) => f);
   else if(sF === 'overdue')  list = ws.filter(({s}) => s.label === '逾期').map(({f}) => f);
   else if(sF === 'refunded') list = ws.filter(({s}) => s.refunded).map(({f}) => f);
   else list = ws.map(({f}) => f);
-  const ti = fees.filter(f => f.status !== 'refunded').reduce((a, f) => a + f.amount, 0);
+  // ti/tw: based on filtered list; tp/tr: all time (for comparison)
+  const ti = list.filter(f => f.status !== 'refunded').reduce((a, f) => a + f.amount, 0);
   const tp = txns.filter(t => t.type === 'pay').reduce((a, t) => a + t.amount, 0);
-  const tw = fees.filter(f => f.status !== 'refunded').reduce((a, f) => a + feeStatus(f).bal, 0);
-  const tr = txns.filter(t => t.type === 'refund').reduce((a, t) => a + t.amount, 0);
+  const tw = list.filter(f => f.status !== 'refunded').reduce((a, f) => a + feeStatus(f).bal, 0);
+  const tr = list.filter(f => f.status === 'refunded').reduce((a, f) => a + f.amount, 0);
+  // Month filter label
+  const mf = document.getElementById('fee-month-filter');
+  const mfVal = mf ? mf.value : '';
+  const mfLabel = mfVal ? mfVal+'月份' : '全部期間';
+  // Paid in period (by payment date)
+  const tpPeriod = txns.filter(t => t.type==='pay' && (!mfVal || (t.date||'').startsWith(mfVal))).reduce((a,t)=>a+t.amount,0);
   const metricsEl = document.getElementById('fee-metrics');
   if(metricsEl) metricsEl.innerHTML = `
-    <div class="mc"><div class="mc-lbl">總開帳</div><div class="mc-val">${fmt(ti)}</div></div>
-    <div class="mc"><div class="mc-lbl">已收款</div><div class="mc-val" style="color:#27500A">${fmt(tp)}</div></div>
+    <div class="mc"><div class="mc-lbl">開帳金額（${mfLabel}）</div><div class="mc-val">${fmt(ti)}</div></div>
+    <div class="mc"><div class="mc-lbl">實收金額（${mfLabel}）</div><div class="mc-val" style="color:#27500A">${fmt(tpPeriod)}</div></div>
+    <div class="mc"><div class="mc-lbl">累計總收款</div><div class="mc-val" style="color:#27500A">${fmt(tp)}</div></div>
     <div class="mc"><div class="mc-lbl">未收款</div><div class="mc-val" style="color:${tw>0?'#A32D2D':'inherit'}">${fmt(tw)}</div></div>
     <div class="mc"><div class="mc-lbl">退費合計</div><div class="mc-val" style="color:${tr>0?'#A32D2D':'inherit'}">${fmt(tr)}</div></div>`;
   if(feeSub === 'ledger')  { renderLedger();     return; }
@@ -3248,6 +3266,60 @@ async function submitParentReg(termId) {
     alert('送出失敗，請檢查網路連線後重試');
     if (btn) { btn.disabled=false; btn.textContent='送出報名資料'; }
   }
+}
+
+
+// ── Fee panel: month filter helpers ──────────────────────────────
+function buildFeeMonthFilter() {
+  const sel = document.getElementById('fee-month-filter');
+  if (!sel) return;
+  const prev = sel.value;
+  // Collect all months from fees (by issuedDate) and txns (by date)
+  const months = new Set();
+  fees.forEach(f => { if(f.issuedDate) months.add(f.issuedDate.slice(0,7)); });
+  txns.forEach(t => { if(t.date) months.add(t.date.slice(0,7)); });
+  const sorted = [...months].sort().reverse();
+  sel.innerHTML = '<option value="">全部月份</option>' +
+    sorted.map(m => {
+      const [y,mo] = m.split('-');
+      return `<option value="${m}" ${m===prev?'selected':''}>${y}年${parseInt(mo)}月</option>`;
+    }).join('');
+}
+
+function setThisMonth() {
+  const now = new Date();
+  const m = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  buildFeeMonthFilter();
+  const sel = document.getElementById('fee-month-filter');
+  if(sel) sel.value = m;
+  applyMonthFilter();
+}
+
+function applyMonthFilter() {
+  const mf = document.getElementById('fee-month-filter');
+  const mfVal = mf ? mf.value : '';
+  if(mfVal) {
+    // Set quick-date-filter to match
+    const from = document.getElementById('fee-quick-from');
+    const to   = document.getElementById('fee-quick-to');
+    if(from) from.value = mfVal+'-01';
+    // Last day of month
+    const [y,mo] = mfVal.split('-').map(Number);
+    const lastDay = new Date(y, mo, 0).getDate();
+    if(to) to.value = mfVal+'-'+String(lastDay).padStart(2,'0');
+  } else {
+    const from = document.getElementById('fee-quick-from');
+    const to   = document.getElementById('fee-quick-to');
+    if(from) from.value=''; if(to) to.value='';
+  }
+  renderFee();
+}
+
+// Patch renderFee to also filter by date when quick-filter is set
+const _baseBuildFee = buildFeTermFilter;
+function buildFeTermFilter(){
+  _baseBuildFee();
+  buildFeeMonthFilter();
 }
 
 </script>
