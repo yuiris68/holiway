@@ -1185,6 +1185,117 @@ function buildSiTerms() {
     .map(t=>`<option value="${t.id}" ${termStatus(t).key==='active'?'selected':''}>${t.name}</option>`).join('');
   buildSiSess();
 }
+// ── Sign-in panel functions ──────────────────────────────────────
+function buildSiSess() {
+  const termId = document.getElementById('si-term').value;
+  const t = terms.find(x=>x.id===termId);
+  document.getElementById('si-sess').innerHTML = t
+    ? sessions.filter(s=>t.sessions&&t.sessions.includes(s.id))
+              .sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9))
+              .map(s=>{const v=getVenue(s.venueId);return`<option value="${s.id}">${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name}</option>`;}).join('')
+    : '';
+  renderSignin();
+  setTimeout(updateSubCoachUI, 100);
+}
+
+function renderSignin() {
+  const termId = document.getElementById('si-term').value;
+  const sessId = document.getElementById('si-sess').value;
+  const date   = document.getElementById('si-date').value;
+  const s = getSess(sessId); if (!s) return;
+  curSiKey = sessId+'|'+date; curSiTermId = termId; curSiSessId = sessId;
+  const rec      = signinRec[curSiKey] || {};
+  const co       = COACHES[s.coach] || {};
+  const v        = getVenue(s.venueId);
+  const enrolled = getEnrolled(termId, sessId);
+  const mkStu    = makeupRec.filter(m=>m.makeupSessionId===sessId&&m.makeupDate===date&&m.status==='scheduled');
+  const presentN = Object.values(rec).filter(x=>x==='present').length;
+  const leaveN   = Object.values(rec).filter(x=>x==='leave').length;
+  const isManual = document.getElementById('manual-mode')?.checked || false;
+  const subName  = rec._substituteCoach || '';
+
+  // QR box
+  const qrUrl = `https://haloway.app/signin?s=${sessId}&t=${termId}&d=${date}`;
+  document.getElementById('qr-area').innerHTML = `
+    <div class="qr-box">
+      <div style="font-size:12px;font-weight:500;margin-bottom:7px">家長 QR Code 簽到</div>
+      <div class="qr-grid">
+        <canvas id="qr-cv" width="96" height="96" style="border-radius:6px;background:#fff;padding:4px;display:block"></canvas>
+        <div>
+          <div style="font-size:12px;font-weight:500">${s.name}</div>
+          <div style="font-size:11px;color:#999">${v?v.name+' · ':''}${s.day} ${s.time} · ${s.coach} · ${date}</div>
+          ${subName?`<div style="font-size:11px;color:#BA7517;margin-top:3px">🔄 今日代課：${subName}</div>`:''}
+          <div style="display:flex;gap:5px;margin-top:5px">
+            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="dlQR()">下載 QR</button>
+            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="simScan('${termId}','${sessId}','${date}')">模擬掃碼</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  try { new QRious({element:document.getElementById('qr-cv'),value:qrUrl,size:96,foreground:'#1a1a1a',background:'#ffffff'}); } catch(e) {}
+
+  // Stats bar
+  const statsBar = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 10px;background:#f8f8f8;border-radius:8px">
+      <div class="av" style="background:${co.color||'#eee'}20;color:${co.color||'#666'};width:28px;height:28px;font-size:12px">${s.coach[0]}</div>
+      <div>
+        <div style="font-size:12px;font-weight:500">${s.coach}${subName?' → <span style="color:#BA7517">'+subName+'</span>':''} · ${v?v.name:''}</div>
+        <div style="font-size:11px;color:#999">${s.name} · ${date}${isManual?' · <span style="color:#639922">✏️ 手動模式</span>':''}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:12px">
+        <div style="text-align:center"><div style="font-size:15px;font-weight:500;color:#27500A">${presentN}</div><div style="font-size:10px">出席</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:500;color:#378ADD">${leaveN}</div><div style="font-size:10px">請假</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:500">${enrolled.length+mkStu.length}</div><div style="font-size:10px">名單</div></div>
+      </div>
+    </div>`;
+
+  // Manual save button
+  const saveBtn = document.getElementById('manual-save-btn');
+  if (saveBtn) saveBtn.style.display = isManual ? 'inline-block' : 'none';
+
+  const buildRow = (stId, name, ageY, ageM, height, isMakeup=false) => {
+    const cur = rec[stId] || '';
+    if (isManual) {
+      return `<div class="srow ${cur}" style="flex-wrap:wrap">
+        <input type="checkbox" class="si-check" ${cur==='present'?'checked':''} onchange="manualCheck('${stId}',this.checked)">
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:500">${name}${isMakeup?' <span class="pill pill-purple" style="font-size:10px">補課</span>':''}</div>
+          <div style="font-size:10px;color:#999">${fmtAge(ageY,ageM)}${height?' · '+height+'cm':''}</div>
+        </div>
+        <div style="display:flex;gap:3px;flex-wrap:wrap">
+          <button class="sb ${cur==='present'?'sp':''}" onclick="siSetQuick('${stId}','present')">✓ 出席</button>
+          <button class="sb ${cur==='leave'?'sl':''}" onclick="siSetQuick('${stId}','leave')">△ 請假</button>
+          <button class="sb ${cur==='absent'?'sa':''}" onclick="siSetQuick('${stId}','absent')">✕ 缺席</button>
+          <button class="sb" onclick="siSetQuick('${stId}','')" style="${cur?'':'opacity:.4'}">清除</button>
+        </div>
+      </div>`;
+    } else {
+      return `<div class="srow ${cur}">
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:500">${name}${isMakeup?' <span class="pill pill-purple" style="font-size:10px">補課</span>':''}</div>
+          <div style="font-size:10px;color:#999">${fmtAge(ageY,ageM)}${height?' · '+height+'cm':''}</div>
+        </div>
+        <div style="display:flex;gap:3px">
+          <button class="sb ${cur==='present'?'sp':''}" onclick="setSI('${curSiKey}','${stId}','present','${termId}','${sessId}')">出席</button>
+          <button class="sb ${cur==='leave'?'sl':''}" onclick="setSI('${curSiKey}','${stId}','leave','${termId}','${sessId}')">請假</button>
+          <button class="sb ${cur==='absent'?'sa':''}" onclick="setSI('${curSiKey}','${stId}','absent','${termId}','${sessId}')">缺席</button>
+        </div>
+      </div>`;
+    }
+  };
+
+  const rows = enrolled.map(e => {
+    const st = getSt(e.studentId) || {name:e.studentName||'?', ageY:0, ageM:0, height:0};
+    return buildRow(e.studentId, st.name, st.ageY, st.ageM, st.height);
+  }).join('') + mkStu.map(m => {
+    const st = getSt(m.studentId);
+    return buildRow(m.studentId, st.name, st.ageY, st.ageM, st.height, true);
+  }).join('');
+
+  document.getElementById('signin-body').innerHTML = statsBar + (rows || '<div class="empty">此班次尚無報名學生</div>');
+  setTimeout(updateSubCoachUI, 50);
+}
+
 
 
 
