@@ -710,7 +710,171 @@ function openEditStudent(id){const st=students.find(s=>s.id===id);if(!st)return;
 async function addStu(){const d=getStuData();if(!d.name){alert('請輸入學生姓名');return;}students.push({id:'s'+Date.now(),...d,attended:0,leaves:0,makeups:0,leaveMax:2,startDate:today()});await saveCol('students',students);closeMod();renderStudents();renderDash();}
 async function saveStudent(id){const d=getStuData();if(!d.name){alert('請輸入學生姓名');return;}const i=students.findIndex(s=>s.id===id);if(i>=0)students[i]={...students[i],...d};await saveCol('students',students);closeMod();renderStudents();}
 async function delStu(id){if(!confirm('確認刪除此學生？'))return;students=students.filter(s=>s.id!==id);await saveCol('students',students);renderStudents();renderDash();}
-function openIssueFeeForStudent(stId){renderFeeForm(null,stId,null);}
+function openIssueFeeForStudent(stId) {
+  const st = getSt(stId);
+  // Get all active enrollments for this student
+  const stEnrolls = enrolls.filter(e => e.studentId === stId && e.status === 'enrolled');
+
+  if (!stEnrolls.length) {
+    // No enrollments, open blank fee form
+    renderFeeForm(null, stId, null);
+    return;
+  }
+
+  // Build list of courses with fees
+  const courseItems = stEnrolls.map(e => {
+    const s = getSess(e.sessionId);
+    const t = terms.find(x => x.id === e.termId);
+    const pr = s ? getSessPrice(s.id) : null;
+    return { sessId: e.sessionId, termId: e.termId, sess: s, term: t, price: pr };
+  }).filter(x => x.sess);
+
+  // If only one enrollment, use simple form
+  if (courseItems.length === 1) {
+    const c = courseItems[0];
+    renderFeeForm(c.termId, stId, c.sessId);
+    return;
+  }
+
+  // Multiple enrollments - show multi-course bill form
+  openMultiCourseFee(stId, courseItems);
+}
+
+function openMultiCourseFee(stId, courseItems) {
+  const st = getSt(stId);
+  const totalPrice = courseItems.reduce((a, c) => a + (c.price || 0), 0);
+  const due = addWeeks(today(), 14);
+
+  document.getElementById('mod-title').textContent = '開立帳單 — ' + st.name;
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#EAF3DE;border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12px;color:#27500A">
+      ✓ 自動帶入 ${st.name} 的所有報名課程
+    </div>
+
+    <div style="font-size:11px;font-weight:500;color:#666;margin-bottom:6px">選擇要開帳的課程</div>
+    ${courseItems.map((c, i) => {
+      const v = c.sess ? getVenue(c.sess.venueId) : null;
+      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:0.5px solid #e0e0e0;border-radius:8px;margin-bottom:6px;background:#fff">
+        <input type="checkbox" id="mf-chk-${i}" checked
+          onchange="mcfRecalc()" style="width:16px;height:16px;accent-color:var(--pink);flex-shrink:0">
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:500">${c.sess.name} · ${c.sess.day} ${c.sess.time}</div>
+          <div style="font-size:11px;color:#999">${c.term ? c.term.name : '—'}${v ? ' · ' + v.shortName : ''} · ${c.sess.periodLessons}堂/期</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <input type="number" id="mf-price-${i}" value="${c.price || ''}"
+            placeholder="未設費率" min="0" step="100" oninput="mcfRecalc()"
+            style="width:90px;text-align:right;font-size:12px;padding:4px 6px">
+          <div style="font-size:10px;color:#999;margin-top:1px">NT$/期</div>
+        </div>
+      </div>`;
+    }).join('')}
+
+    <div id="mcf-total-box" style="background:#f8f8f8;border-radius:8px;padding:9px 12px;margin:6px 0 10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+        <span style="color:#666">已選課程小計</span>
+        <span id="mcf-subtotal" style="font-weight:500">NT$0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <span style="font-size:12px;color:#666">折扣 (NT$)</span>
+        <input type="number" id="mcf-disc" value="0" min="0" step="100" oninput="mcfRecalc()"
+          style="width:90px;font-size:12px;padding:4px 6px">
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;margin-top:6px;border-top:0.5px solid #e0e0e0;padding-top:6px">
+        <span>應繳合計</span>
+        <span id="mcf-total" style="color:var(--pink)">NT$0</span>
+      </div>
+    </div>
+
+    <div class="fg">
+      <div class="fr">
+        <label>到期日</label>
+        <input type="date" id="mcf-due" value="${due}">
+      </div>
+      <div class="fr">
+        <label>帳單說明（選填）</label>
+        <input type="text" id="mcf-note" value="${courseItems.map(c=>c.sess.name).join('、')}" placeholder="課程費用">
+      </div>
+    </div>
+
+    <button class="btn btn-pink" style="width:100%;margin-top:4px" onclick="submitMultiCourseFee('${stId}')">確認開立帳單</button>`;
+
+  document.getElementById('overlay').style.display = 'flex';
+  // Store course items for submit
+  window._mcfItems = courseItems;
+  mcfRecalc();
+}
+
+function mcfRecalc() {
+  const items = window._mcfItems || [];
+  let subtotal = 0;
+  items.forEach((c, i) => {
+    const chk = document.getElementById('mf-chk-' + i);
+    const priceEl = document.getElementById('mf-price-' + i);
+    if (chk && chk.checked && priceEl) {
+      subtotal += parseFloat(priceEl.value) || 0;
+    }
+  });
+  const disc = parseFloat(document.getElementById('mcf-disc')?.value) || 0;
+  const total = Math.max(0, subtotal - disc);
+  const sub = document.getElementById('mcf-subtotal');
+  const tot = document.getElementById('mcf-total');
+  if (sub) sub.textContent = 'NT$' + subtotal.toLocaleString();
+  if (tot) tot.textContent = 'NT$' + total.toLocaleString();
+}
+
+async function submitMultiCourseFee(stId) {
+  const items = window._mcfItems || [];
+  const disc  = parseFloat(document.getElementById('mcf-disc')?.value) || 0;
+  const due   = document.getElementById('mcf-due')?.value || '';
+  const note  = document.getElementById('mcf-note')?.value || '課程費用';
+
+  // Collect selected courses and prices
+  const selected = items.map((c, i) => {
+    const chk     = document.getElementById('mf-chk-' + i);
+    const priceEl = document.getElementById('mf-price-' + i);
+    if (!chk || !chk.checked) return null;
+    const price = parseFloat(priceEl?.value) || 0;
+    return { ...c, price };
+  }).filter(Boolean);
+
+  if (!selected.length) { alert('請至少選擇一門課程'); return; }
+
+  const subtotal = selected.reduce((a, c) => a + c.price, 0);
+  const total    = Math.max(0, subtotal - disc);
+  if (total <= 0) { alert('請填寫課程費用'); return; }
+
+  // Use the first enrollment's term for reference dates
+  const refTerm = selected[0].term;
+
+  const fee = {
+    id:          'f' + Date.now(),
+    studentId:   stId,
+    termId:      selected[0].termId,
+    sessionId:   selected.length === 1 ? selected[0].sessId : null,
+    amount:      subtotal,
+    description: note,
+    dueDate:     due,
+    issuedDate:  today(),
+    termStartDate: refTerm?.startDate || null,
+    termEndDate:   refTerm?.endDate   || null,
+    courses:     selected.map(c => ({ sessId: c.sessId, price: c.price, name: c.sess.name }))
+  };
+
+  fees.push(fee);
+
+  if (disc > 0) {
+    txns.push({ id:'t'+Date.now(), feeId:fee.id, studentId:stId, type:'disc',
+      amount:disc, date:today(), method:'—', note:'開帳折扣' });
+  }
+
+  await saveCol('fees', fees);
+  await saveCol('txns', txns);
+  closeMod();
+  renderStudents();
+  renderDash();
+  hint('帳單已開立 ✓');
+}
 
 function closeMod(){document.getElementById('overlay').style.display='none';}
 
@@ -1189,11 +1353,12 @@ function dlStuQR(){const c=document.getElementById('stu-qr-cv');if(!c)return;con
 
 // ── Show all terms' QR codes (default view) ──────────────────────
 function showAllRegQR() {
-  const allTerms = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
+  // Only show active / enrolling / upcoming terms (hide ended)
+  const allTerms = [...terms].filter(t=>termStatus(t).key!=='ended').sort((a,b)=>a.startDate.localeCompare(b.startDate));
   const body = document.getElementById('reg-qr-body');
 
   if (!allTerms.length) {
-    body.innerHTML = '<div class="empty">尚無期別資料，請先在「期別/報名」新增期別</div>';
+    body.innerHTML = '<div class="empty">目前沒有開放報名的期別</div>';
     return;
   }
 
