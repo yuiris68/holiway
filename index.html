@@ -455,11 +455,6 @@ auth.onAuthStateChanged(user=>{
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app-screen').style.display='block';
     document.getElementById('user-email').textContent=user.email;
-    // Show loading state immediately, initApp will re-render with real data
-    const dm = document.getElementById('dash-metrics');
-    const db2 = document.getElementById('dash-body');
-    if(dm) dm.innerHTML='<div class="mc"><div class="mc-lbl">登入成功</div><div class="mc-val" style="font-size:13px;color:#aaa">資料載入中...</div></div>';
-    if(db2) db2.innerHTML='<div style="color:#aaa;font-size:12px;padding:20px">Firebase 資料同步中，請稍候...</div>';
     initApp();
   }else{
     document.getElementById('login-screen').style.display='flex';
@@ -2527,38 +2522,53 @@ let subLog = []; // [{id, sessId, date, origCoach, subCoach, subFee, studentCoun
 // Load subLog on init
 const _v3Init = initApp;
 async function initApp() {
-  // call existing initApp
   showLoading('載入資料…');
   try {
-    venues=await fsGet('venues'); sessions=await fsGet('sessions'); terms=await fsGet('terms');
-    enrolls=await fsGet('enrolls'); students=await fsGet('students');
-    makeupRec=await fsGet('makeup'); fees=await fsGet('fees'); txns=await fsGet('txns');
-    pricing=await fsGet('pricing'); pendingSubs=await fsGet('pending');
-    coaches=await fsGet('coaches');
-    subLog=await fsGet('sublog');
-    const srSnap=await db.collection('signin').get();
-    signinRec={}; srSnap.docs.forEach(d=>{signinRec[d.id]=d.data();});
-    if(!venues.length){venues=JSON.parse(JSON.stringify(SEED_VENUES));await fsSave('venues',venues);}
-    if(!sessions.length){sessions=JSON.parse(JSON.stringify(SEED_SESSIONS));await fsSave('sessions',sessions);}
-    if(!terms.length){terms=makeSeedTerms();await fsSave('terms',terms);}
-    if(!pricing.length){pricing=JSON.parse(JSON.stringify(SEED_PRICING));await fsSave('pricing',pricing);}
-    if(!coaches.length){
-      coaches=Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
-      await saveCol('coaches',coaches);
+    venues      = await fsGet('venues');
+    sessions    = await fsGet('sessions');
+    terms       = await fsGet('terms');
+    enrolls     = await fsGet('enrolls');
+    students    = await fsGet('students');
+    makeupRec   = await fsGet('makeup');
+    fees        = await fsGet('fees');
+    txns        = await fsGet('txns');
+    pricing     = await fsGet('pricing');
+    pendingSubs = await fsGet('pending');
+    coaches     = await fsGet('coaches');
+    subLog      = await fsGet('sublog');
+    const srSnap = await db.collection('signin').get();
+    signinRec = {};
+    srSnap.docs.forEach(d => { signinRec[d.id] = d.data(); });
+    // Seed defaults if empty
+    if (!venues.length)   { venues   = JSON.parse(JSON.stringify(SEED_VENUES));   await fsSave('venues',   venues);   }
+    if (!sessions.length) { sessions = JSON.parse(JSON.stringify(SEED_SESSIONS)); await fsSave('sessions', sessions); }
+    if (!terms.length)    { terms    = makeSeedTerms();                            await fsSave('terms',    terms);    }
+    if (!pricing.length)  { pricing  = JSON.parse(JSON.stringify(SEED_PRICING));  await fsSave('pricing',  pricing);  }
+    if (!coaches.length)  {
+      coaches = Object.entries(COACHES).map(([name,d],i) => ({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
+      await saveCol('coaches', coaches);
     }
-    document.getElementById('db-st').textContent='✓ Firebase 已連線';
+    document.getElementById('db-st').textContent = '✓ Firebase 已連線';
   } catch(e) {
-    console.error(e);
-    document.getElementById('db-st').textContent='⚠ 離線';
-    venues=JSON.parse(JSON.stringify(SEED_VENUES));sessions=JSON.parse(JSON.stringify(SEED_SESSIONS));
-    terms=makeSeedTerms();pricing=JSON.parse(JSON.stringify(SEED_PRICING));
-    enrolls=[];students=[];signinRec={};makeupRec=[];fees=[];txns=[];pendingSubs=[];
-    coaches=Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
-    subLog=[];
+    console.error('initApp error:', e);
+    document.getElementById('db-st').textContent = '⚠ 離線模式';
+    // Use seed data as fallback
+    if (!venues.length)   venues   = JSON.parse(JSON.stringify(SEED_VENUES));
+    if (!sessions.length) sessions = JSON.parse(JSON.stringify(SEED_SESSIONS));
+    if (!terms.length)    terms    = makeSeedTerms();
+    if (!pricing.length)  pricing  = JSON.parse(JSON.stringify(SEED_PRICING));
+    if (!coaches.length)  coaches  = Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
+    if (!pendingSubs) pendingSubs = [];
+    if (!subLog) subLog = [];
+  } finally {
+    // ALWAYS run these regardless of success or error
+    hideLoading();
+    try { document.getElementById('si-date').value = today(); } catch(e2){}
+    try { buildSiTerms(); } catch(e2){}
+    try { buildFeTermFilter(); } catch(e2){}
+    try { buildRqTermSelect(); } catch(e2){}
+    try { renderDash(); } catch(e2){ console.error('renderDash error:', e2); }
   }
-  hideLoading();
-  document.getElementById('si-date').value=today();
-  buildSiTerms();buildFeTermFilter();buildRqTermSelect();renderDash();
 }
 
 // ── Patch sw for new panels ──────────────────────────────────────
