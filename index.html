@@ -448,7 +448,6 @@ function doLogout(){if(confirm('確認登出？'))auth.signOut();}
   }
 })();
 
-let _dataLoaded = false;
 auth.onAuthStateChanged(user=>{
   // Never interfere if in parent registration mode
   if(new URLSearchParams(window.location.search).get('mode')==='register') return;
@@ -456,10 +455,8 @@ auth.onAuthStateChanged(user=>{
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app-screen').style.display='block';
     document.getElementById('user-email').textContent=user.email;
-    _dataLoaded = false; // reset flag before loading
-    initApp().then(()=>{ _dataLoaded = true; renderDash(); });
+    initApp();
   }else{
-    _dataLoaded = false;
     document.getElementById('login-screen').style.display='flex';
     document.getElementById('app-screen').style.display='none';
   }
@@ -525,40 +522,7 @@ let venues=[],sessions=[],terms=[],enrolls=[],students=[],signinRec={},makeupRec
 let sessVenueFilter='all',feeSub='bills';
 
 // ── Init ─────────────────────────────────────────────
-async function initApp(){
-  showLoading('從雲端載入資料…');
-  try{
-    venues=await fsGet('venues');
-    sessions=await fsGet('sessions');
-    terms=await fsGet('terms');
-    enrolls=await fsGet('enrolls');
-    students=await fsGet('students');
-    makeupRec=await fsGet('makeup');
-    fees=await fsGet('fees');
-    txns=await fsGet('txns');
-    pricing=await fsGet('pricing');
 
-    // Load signinRec (stored as single doc per key)
-    const srSnap=await db.collection('signin').get();
-    signinRec={};srSnap.docs.forEach(d=>{signinRec[d.id]=d.data();});
-
-    // Seed if empty
-    if(!venues.length){venues=JSON.parse(JSON.stringify(SEED_VENUES));await fsSave('venues',venues);}
-    if(!sessions.length){sessions=JSON.parse(JSON.stringify(SEED_SESSIONS));await fsSave('sessions',sessions);}
-    if(!terms.length){terms=makeSeedTerms();await fsSave('terms',terms);}
-    if(!pricing.length){pricing=JSON.parse(JSON.stringify(SEED_PRICING));await fsSave('pricing',pricing);}
-
-    document.getElementById('db-st').textContent='✓ Firebase 已連線';
-  }catch(e){
-    console.error(e);
-    document.getElementById('db-st').textContent='⚠ 離線模式';
-    document.getElementById('db-st').style.background='#FCEBEB';
-    document.getElementById('db-st').style.color='#501313';
-  }
-  hideLoading();
-  document.getElementById('si-date').value=today();
-  buildSiTerms();buildFeTermFilter();renderDash();
-}
 
 // ── Save helpers ─────────────────────────────────────
 async function saveCol(col,arr){await fsSave(col,arr);}
@@ -599,21 +563,16 @@ function feeStatus(f){
 }
 function enrollBar(e,c,w=0){const p=Math.min(100,Math.round(e/c*100));const f=e>=c;const bc=f?'var(--red)':p>=80?'var(--amber)':'var(--green)';return`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><div class="cap-bar-wrap"><div class="cap-bar" style="width:${p}%;background:${bc}"></div></div><span class="enroll-chip ${f?'ec-full':'ec-enrolled'}">${e}/${c} 人</span>${w?`<span class="enroll-chip ec-wait">候補 ${w}</span>`:''}</div>`;}
 
-function sw(tab,btn){
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
-  document.getElementById('panel-'+tab).classList.add('active');
-  if(btn)btn.classList.add('active');
-  ({dash:renderDash,venues:renderVenues,sessions:renderSessions,terms:renderTerms,signin:renderSignin,makeup:renderMakeup,fee:renderFee,students:renderStudents}[tab]||function(){})();
-}
+
 
 // ── DASH ─────────────────────────────────────────────
 function renderDash(){
-  // Guard: if data not loaded yet, show placeholder
-  if(typeof _dataLoaded !== 'undefined' && !_dataLoaded){
-    const m=document.getElementById('dash-metrics');const b=document.getElementById('dash-body');
-    if(m)m.innerHTML='<div class="mc"><div class="mc-lbl">載入中</div><div class="mc-val" style="font-size:14px;color:#aaa">請稍候…</div></div>';
-    if(b)b.innerHTML='';return;
+  // If no data yet, show brief loading state (initApp will call renderDash again)
+  if(!venues.length && !sessions.length && !terms.length){
+    document.getElementById('dash-metrics').innerHTML=
+      '<div class="mc"><div class="mc-lbl" style="font-size:12px;color:#aaa">資料載入中，請稍候...</div></div>';
+    document.getElementById('dash-body').innerHTML='';
+    return;
   }
   const activeTerm=terms.find(t=>termStatus(t).key==='active');
   const totalOwed=fees.filter(f=>f.status!=='refunded').reduce((a,f)=>a+feeStatus(f).bal,0);
@@ -899,41 +858,7 @@ let pendingSubs = [];
 let curSiKey = '', curSiTermId = '', curSiSessId = '';
 
 // ── Patch initApp to also load pending & build new selects ──
-const _baseInit = initApp;
-async function initApp() {
-  showLoading('從 Firebase 載入資料…');
-  try {
-    venues   = await fsGet('venues');
-    sessions = await fsGet('sessions');
-    terms    = await fsGet('terms');
-    enrolls  = await fsGet('enrolls');
-    students = await fsGet('students');
-    makeupRec= await fsGet('makeup');
-    fees     = await fsGet('fees');
-    txns     = await fsGet('txns');
-    pricing  = await fsGet('pricing');
-    pendingSubs = await fsGet('pending');
-    const srSnap = await db.collection('signin').get();
-    signinRec = {};
-    srSnap.docs.forEach(d => { signinRec[d.id] = d.data(); });
-    if (!venues.length)  { venues   = JSON.parse(JSON.stringify(SEED_VENUES));   await fsSave('venues',  venues);  }
-    if (!sessions.length){ sessions = JSON.parse(JSON.stringify(SEED_SESSIONS)); await fsSave('sessions',sessions);}
-    if (!terms.length)   { terms    = makeSeedTerms();                            await fsSave('terms',   terms);   }
-    if (!pricing.length) { pricing  = JSON.parse(JSON.stringify(SEED_PRICING));  await fsSave('pricing', pricing); }
-    document.getElementById('db-st').textContent = '✓ Firebase 已連線';
-  } catch(e) {
-    console.error(e);
-    document.getElementById('db-st').textContent = '⚠ 離線';
-    venues   = JSON.parse(JSON.stringify(SEED_VENUES));
-    sessions = JSON.parse(JSON.stringify(SEED_SESSIONS));
-    terms    = makeSeedTerms();
-    pricing  = JSON.parse(JSON.stringify(SEED_PRICING));
-    enrolls  = []; students = []; signinRec = {}; makeupRec = []; fees = []; txns = []; pendingSubs = [];
-  }
-  hideLoading();
-  document.getElementById('si-date').value = today();
-  buildSiTerms(); buildFeTermFilter(); buildRqTermSelect(); renderDash();
-}
+
 
 function buildRqTermSelect() {
   const sel = document.getElementById('rq-term');
@@ -946,23 +871,7 @@ function buildRqTermSelect() {
 }
 
 // ── Override sw() to handle new panels ──
-function sw(tab, btn) {
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
-  document.getElementById('panel-'+tab).classList.add('active');
-  if (btn) btn.classList.add('active');
-  ({
-    dash: renderDash,
-    venues: renderVenues,
-    sessions: renderSessions,
-    terms: renderTerms,
-    signin: renderSignin,
-    makeup: renderMakeup,
-    fee: renderFee,
-    students: renderStudents,
-    'reg-qr': renderRegQR,
-  }[tab] || function(){})();
-}
+
 
 // ══════════════════════════════════════
 // FEATURE 1: Course dates & holidays
@@ -1837,54 +1746,11 @@ async function toggleAtt(sessId, date, stId, termId, origSessId) {
 let coaches = [];
 
 // Patch initApp to load coaches
-const _v2Init = initApp;
-async function initApp() {
-  showLoading('載入資料…');
-  try {
-    venues=await fsGet('venues'); sessions=await fsGet('sessions'); terms=await fsGet('terms');
-    enrolls=await fsGet('enrolls'); students=await fsGet('students');
-    makeupRec=await fsGet('makeup'); fees=await fsGet('fees'); txns=await fsGet('txns');
-    pricing=await fsGet('pricing'); pendingSubs=await fsGet('pending');
-    coaches=await fsGet('coaches');
-    const srSnap=await db.collection('signin').get();
-    signinRec={}; srSnap.docs.forEach(d=>{signinRec[d.id]=d.data();});
-    if(!venues.length){venues=JSON.parse(JSON.stringify(SEED_VENUES));await fsSave('venues',venues);}
-    if(!sessions.length){sessions=JSON.parse(JSON.stringify(SEED_SESSIONS));await fsSave('sessions',sessions);}
-    if(!terms.length){terms=makeSeedTerms();await fsSave('terms',terms);}
-    if(!pricing.length){pricing=JSON.parse(JSON.stringify(SEED_PRICING));await fsSave('pricing',pricing);}
-    // Seed coaches from COACHES constant if empty
-    if(!coaches.length){
-      coaches=Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
-      await saveCol('coaches',coaches);
-    }
-    document.getElementById('db-st').textContent='✓ Firebase 已連線';
-  } catch(e){
-    console.error(e);
-    document.getElementById('db-st').textContent='⚠ 離線';
-    venues=JSON.parse(JSON.stringify(SEED_VENUES)); sessions=JSON.parse(JSON.stringify(SEED_SESSIONS));
-    terms=makeSeedTerms(); pricing=JSON.parse(JSON.stringify(SEED_PRICING));
-    enrolls=[]; students=[]; signinRec={}; makeupRec=[]; fees=[]; txns=[]; pendingSubs=[];
-    coaches=Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
-  }
-  hideLoading();
-  document.getElementById('si-date').value=today();
-  buildSiTerms(); buildFeTermFilter(); buildRqTermSelect(); renderDash();
-}
+
 
 // patch sw for new panels
 const _v2sw = sw;
-function sw(tab, btn) {
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
-  document.getElementById('panel-'+tab).classList.add('active');
-  if(btn) btn.classList.add('active');
-  ({
-    dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
-    signin:renderSignin, makeup:renderMakeup, fee:renderFee, students:renderStudents,
-    'reg-qr':()=>{buildRqTermSelect();renderRegQR();}, coaches:renderCoaches, reports:()=>showReport('att',document.querySelector('.tab-btn')),
-    'term-att': ()=>{}
-  }[tab]||function(){})();
-}
+
 
 function getCoachNames() { return coaches.filter(c=>c.active).map(c=>c.name); }
 function getCoach(name)  { return coaches.find(c=>c.name===name); }
@@ -2693,8 +2559,7 @@ async function initApp() {
   }
   hideLoading();
   document.getElementById('si-date').value=today();
-  buildSiTerms();buildFeTermFilter();buildRqTermSelect();
-  // renderDash() is called by auth.onAuthStateChanged after initApp() resolves
+  buildSiTerms();buildFeTermFilter();buildRqTermSelect();renderDash();
 }
 
 // ── Patch sw for new panels ──────────────────────────────────────
