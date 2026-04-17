@@ -449,6 +449,8 @@ function doLogout(){if(confirm('確認登出？'))auth.signOut();}
 })();
 
 auth.onAuthStateChanged(user=>{
+  // Never interfere if in parent registration mode
+  if(new URLSearchParams(window.location.search).get('mode')==='register') return;
   if(user){
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app-screen').style.display='block';
@@ -1198,7 +1200,51 @@ function renderRegQR() {
   const aSec = document.getElementById('reg-approved-section');
   pSec.style.display = termId ? 'block' : 'none';
   aSec.style.display = termId ? 'block' : 'none';
-  if (!termId) { document.getElementById('reg-qr-body').innerHTML='<div class="empty">請先選擇期別</div>'; return; }
+  if (!termId) {
+    // Show all active/enrolling terms when none selected
+    const allTerms = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
+    if (!allTerms.length) { document.getElementById('reg-qr-body').innerHTML='<div class="empty">尚無期別資料</div>'; return; }
+    document.getElementById('reg-qr-body').innerHTML = allTerms.map((t,i)=>{
+      const url = window.location.href.split('?')[0]+'?mode=register&term='+t.id;
+      const st  = termStatus(t);
+      return `<div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500">${t.name}</div>
+            <div style="font-size:11px;color:#999">${fmtD(t.startDate)} — ${fmtD(t.endDate)}</div>
+          </div>
+          <span class="pill ${pillCls(st.key)}">${st.label}</span>
+        </div>
+        <div class="qr-grid">
+          <canvas id="all-qr-cv-${i}" width="100" height="100" style="border-radius:8px;background:#fff;padding:4px;display:block"></canvas>
+          <div>
+            <div style="font-size:10px;color:#999;word-break:break-all;margin-bottom:6px">${url}</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+              <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="dlQRById('all-qr-cv-${i}','${t.name}')">下載 QR</button>
+              <button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="previewParentForm('${t.id}')">預覽填表頁</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    // Render all QR codes after HTML is set
+    allTerms.forEach((t,i)=>{
+      try{ new QRious({element:document.getElementById('all-qr-cv-'+i),value:window.location.href.split('?')[0]+'?mode=register&term='+t.id,size:100,foreground:'#1a1a1a',background:'#ffffff'}); }catch(e){}
+    });
+    // Still show pending section for all terms
+    const allPending  = pendingSubs.filter(p=>p.status==='pending');
+    const allApproved = pendingSubs.filter(p=>p.status==='approved');
+    document.getElementById('reg-pending-section').style.display = 'block';
+    document.getElementById('reg-approved-section').style.display = 'block';
+    document.getElementById('reg-pending-count').textContent = allPending.length+' 筆';
+    document.getElementById('reg-pending-list').innerHTML = allPending.length
+      ? allPending.map(p=>{ const t=terms.find(x=>x.id===p.termId)||{name:'—'}; return renderPendingCard(p,t); }).join('')
+      : '<div class="empty">目前沒有待審核報名</div>';
+    document.getElementById('reg-approved-list').innerHTML = allApproved.length
+      ? `<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden"><table class="tbl"><colgroup><col style="width:15%"><col style="width:15%"><col style="width:10%"><col style="width:10%"><col style="width:30%"><col style="width:20%"></colgroup><thead><tr><th>期別</th><th>學生</th><th>性別</th><th>年齡</th><th>選擇課程</th><th>家長</th></tr></thead><tbody>${allApproved.map(p=>{const t=terms.find(x=>x.id===p.termId)||{name:'—'};return`<tr><td>${t.name}</td><td style="font-weight:500">${p.childName}</td><td>${p.gender==='male'?'♂ 男':'♀ 女'}</td><td>${fmtAge(p.ageY,p.ageM)}</td><td>${(p.sessionIds||[]).map(sid=>{const s=getSess(sid);return s?`<span class="badge ${s.type}">${s.name}</span> `:''}).join('')}</td><td>${p.parentName}${p.lineId?' · '+p.lineId:''}</td></tr>`;}).join('')}</tbody></table></div>`
+      : '<div class="empty">尚無已審核報名</div>';
+    return;
+  }
 
   const t = terms.find(x=>x.id===termId);
   const url = window.location.href.split('?')[0]+'?mode=register&term='+termId;
@@ -1240,6 +1286,7 @@ function renderRegQR() {
 }
 
 function dlRegQR(){const c=document.getElementById('reg-qr-cv');if(!c)return;const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='報名QR.png';a.click();}
+function dlQRById(canvasId,name){const c=document.getElementById(canvasId);if(!c)return;const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download=(name||'報名QR')+'.png';a.click();}
 
 function renderPendingCard(p, t) {
   const sl = (p.sessionIds||[]).map(sid=>getSess(sid)).filter(Boolean);
@@ -2964,20 +3011,27 @@ async function submitParentReg(termId) {
 
   try {
     await db.collection('pending').doc(sub.id).set(sub);
-    // Show success
+    // Show success - keep parent-reg-page visible, never show login
+    document.getElementById('parent-reg-page').style.display = 'block';
+    document.getElementById('login-screen').style.display    = 'none';
+    document.getElementById('app-screen').style.display      = 'none';
     document.getElementById('parent-reg-content').innerHTML = `
-      <div style="background:#fff;border-radius:16px;padding:40px 24px;text-align:center;margin-top:20px">
-        <div style="font-size:56px;margin-bottom:16px">✅</div>
-        <div style="font-size:20px;font-weight:600;color:#27500A;margin-bottom:8px">報名資料已送出！</div>
-        <div style="font-size:13px;color:#666;line-height:1.8">
-          孩子：<strong>${childName}</strong><br>
-          課程：${sel.map(s=>s.name).join('、')}<br>
-          每期堂數：${autoLessons} 堂<br>
-          <br>工作人員確認後會盡快與您聯繫。<br>感謝您的報名！
+      <div style="background:#fff;border-radius:16px;padding:40px 24px;text-align:center;margin-top:20px;box-shadow:0 2px 12px rgba(0,0,0,.06)">
+        <div style="font-size:60px;margin-bottom:16px">✅</div>
+        <div style="font-size:20px;font-weight:600;color:#27500A;margin-bottom:10px">報名資料填寫完成，已送出。</div>
+        <div style="background:#EAF3DE;border-radius:10px;padding:14px 16px;text-align:left;margin:0 auto 16px;max-width:320px">
+          <div style="font-size:12px;color:#27500A;line-height:2">
+            <div>👦 孩子：<strong>${childName}</strong></div>
+            <div>📋 課程：${sel.map(s=>s.name).join('、')}</div>
+            <div>📅 每期堂數：<strong>${autoLessons} 堂</strong></div>
+          </div>
+        </div>
+        <div style="font-size:13px;color:#666;margin-bottom:20px;line-height:1.8">
+          工作人員確認後會盡快與您聯繫。<br>感謝您的報名！🎉
         </div>
         <button onclick="renderParentRegForm('${termId}')"
-          style="margin-top:20px;padding:12px 24px;background:#f0f0f0;border:none;border-radius:10px;font-size:14px;cursor:pointer;color:#666">
-          再填一份
+          style="width:100%;max-width:300px;padding:13px;background:var(--pink);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer">
+          再填一份報名資料
         </button>
       </div>`;
   } catch(e) {
