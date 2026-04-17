@@ -388,7 +388,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
       <div class="sh"><h2>教練管理</h2>
         <button class="btn btn-pink" style="margin-left:auto" onclick="openAddCoach()">+ 新增教練</button>
       </div>
-      <div id="coaches-body"><div style="padding:20px;color:#999;font-size:12px">載入中...</div></div>
+      <div id="coaches-body"></div>
     </div>
 
     <!-- REPORTS PANEL -->
@@ -2427,19 +2427,24 @@ function renderSignin() {
 }
 
 // ── Coach card: monthly & substitute stats ────────────────────────
-function renderCoaches() {
+async function renderCoaches() {
   const body=document.getElementById('coaches-body');
   if(!body){ return; }
   // Auto-seed from COACHES constant if empty
-  if(!coaches.length){
+  // Auto-seed coaches if empty
+  if(!coaches.length) {
     coaches = Object.entries(COACHES).map(([name,d],i)=>({
       id:'c'+i, name, color:d.color, role:'教練', phone:'', note:'', active:true
     }));
-    saveCol('coaches', coaches).catch(()=>{});
+    try { await saveCol('coaches', coaches); } catch(e){}
+  }
+  if(!coaches.length) {
+    body.innerHTML='<div class="empty">尚無教練資料，請點「+ 新增教練」建立</div>';
+    return;
   }
   const now=new Date();
   const thisMonth=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  body.innerHTML=coaches.map(c=>{
+  try{ body.innerHTML=coaches.map(c=>{
     const sessCount=sessions.filter(s=>s.coach===c.name).length;
     // Month: count as effective coach (sub overrides original)
     let monthPresent=0,monthAsOrig=0,monthAsSub=0;
@@ -2487,7 +2492,7 @@ function renderCoaches() {
       </div>
     </div>`;
   }).join('');
-}
+} catch(e){ body.innerHTML='<div style="color:red;padding:20px">教練載入錯誤：'+e.message+'</div>'; console.error('renderCoaches error:',e); }
 
 // ── Report ①: Attendance with sub comparison & fee calc ──────────
 function calcReportAtt() {
