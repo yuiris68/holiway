@@ -535,6 +535,7 @@ const VENUE_COLORS=['#378ADD','#639922','#D4537E','#BA7517','#7F77DD','#1D9E75',
 function tLabel(t){return{adv:'ADV',snake:'蛇板',multi:'多元',yoyo:'幼幼',halou:'外課'}[t]||t;}
 
 let venues=[],sessions=[],terms=[],enrolls=[],students=[],signinRec={},makeupRec=[],fees=[],txns=[],pricing=[];
+let coaches=[],subLog=[],pendingSubs=[];
 let sessVenueFilter='all',feeSub='bills';
 
 // ── Init ─────────────────────────────────────────────
@@ -1000,7 +1001,7 @@ function closeMod(){document.getElementById('overlay').style.display='none';}
 // ════════════════════════════════════════════════════════
 
 // Extra state
-let pendingSubs = [];
+// pendingSubs declared in main vars above
 let curSiKey = '', curSiTermId = '', curSiSessId = '';
 
 // ── Patch initApp to also load pending & build new selects ──
@@ -1889,7 +1890,7 @@ async function toggleAtt(sessId, date, stId, termId, origSessId) {
 // ══════════════════════════════════════════════════
 // COACH MANAGER
 // ══════════════════════════════════════════════════
-let coaches = [];
+// coaches declared in main vars above
 
 // Patch initApp to load coaches
 
@@ -2649,7 +2650,8 @@ async function setSI(key, stId, status, termId, sessId) {
 // ══════════════════════════════════════════════════════════════════
 
 // Substitute log stored separately for history
-let subLog = []; // [{id, sessId, date, origCoach, subCoach, subFee, studentCount, isExternal}]
+// subLog declared in main vars above
+// [{id, sessId, date, origCoach, subCoach, subFee, studentCount, isExternal}]
 
 // Load subLog on init
 const _v3Init = initApp;
@@ -2711,7 +2713,7 @@ function sw(tab, btn) {
   if(btn) btn.classList.add('active');
   ({
     dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
-    signin:renderSignin, makeup:renderMakeup, fee:renderFee, students:renderStudents,
+    signin:renderSignin, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
     'reg-qr':()=>{ buildRqTermSelect(); renderRegQR(); }, coaches:renderCoaches,
     reports:()=>showReport('att', document.querySelector('.tab-btn')),
     'term-att':()=>{}
