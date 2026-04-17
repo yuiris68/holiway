@@ -127,6 +127,8 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 .qr-box{background:#f8f8f8;border-radius:12px;padding:12px;margin-bottom:10px}
 .qr-grid{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start}
 
+/* ── Substitute Coach ── */
+.sub-active-badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 10px;border-radius:8px;background:#FAEEDA;color:#412402;border:0.5px solid #FAC775;margin-left:8px}
 /* ── New Feature Styles ── */
 .holiday-tag{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:7px;background:#FAEEDA;color:#412402;border:0.5px solid #FAC775;margin:2px}
 .session-date-chip{font-size:10px;color:#378ADD;background:#E6F1FB;border-radius:6px;padding:2px 6px;display:inline-block;margin-bottom:3px}
@@ -251,6 +253,39 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
         <input type="date" id="si-date" style="width:auto;font-size:12px" onchange="renderSignin()">
       </div>
       <div id="qr-area"></div>
+      <!-- Substitute coach selector -->
+      <div id="sub-coach-bar" style="background:#FAEEDA;border-radius:10px;padding:10px 12px;margin-bottom:8px;border:0.5px solid #FAC775">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <span style="font-size:12px;font-weight:500;color:#412402">🔄 今日代課教練設定</span>
+          <span id="sub-coach-badge" style="display:none;font-size:11px;padding:2px 10px;border-radius:8px;background:#BA7517;color:#fff;font-weight:500"></span>
+          <span style="font-size:10px;color:#666;margin-left:auto">設定後，今日出席人次歸入代課教練，不計原教練</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:160px">
+            <label style="font-size:10px;color:#666;margin-bottom:2px;display:block">從教練名單選擇</label>
+            <select id="sub-coach-sel" style="font-size:12px" onchange="onSubCoachSelChange()">
+              <option value="">— 無代課 —</option>
+            </select>
+          </div>
+          <div style="flex:1;min-width:160px">
+            <label style="font-size:10px;color:#666;margin-bottom:2px;display:block">或輸入臨時/外部代課教練</label>
+            <input type="text" id="sub-coach-input" placeholder="輸入姓名" style="font-size:12px" oninput="onSubCoachInputChange()">
+          </div>
+          <div style="flex-shrink:0">
+            <label style="font-size:10px;color:#666;margin-bottom:2px;display:block">代課費（NT$/堂）</label>
+            <input type="number" id="sub-coach-fee" placeholder="0" style="font-size:12px;width:100px" min="0" step="100">
+          </div>
+          <div style="display:flex;gap:5px;flex-shrink:0;align-self:flex-end">
+            <button class="btn btn-amber" style="background:#BA7517;color:#fff;font-size:11px;padding:4px 12px" onclick="saveSubCoach()">✓ 確認代課</button>
+            <button class="btn btn-outline" style="font-size:11px;padding:4px 9px;border-color:#BA7517;color:#BA7517" onclick="clearSubCoach()">清除</button>
+          </div>
+        </div>
+        <div id="sub-coach-confirmed" style="display:none;margin-top:8px;padding:6px 10px;background:#fff;border-radius:7px;font-size:11px;display:none;align-items:center;gap:10px">
+          <span style="color:#412402;font-weight:500">✓ 已設定代課：</span>
+          <span id="sub-coach-confirmed-name" style="font-weight:500;color:#BA7517"></span>
+          <span id="sub-coach-confirmed-fee" style="color:#666"></span>
+        </div>
+      </div>
       <div class="manual-bar">
         <span style="font-size:12px;font-weight:500">教練手動簽到模式</span>
         <label style="display:flex;align-items:center;gap:5px;margin-bottom:0;cursor:pointer">
@@ -2050,6 +2085,621 @@ function exportCurrentReport() {
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
   a.download=filename; a.click();
+}
+
+
+// ══════════════════════════════════════════════════
+// SUBSTITUTE COACH FEATURE
+// ══════════════════════════════════════════════════
+
+function buildSubCoachSelect() {
+  const sel = document.getElementById('sub-coach-sel');
+  if (!sel) return;
+  const coachNames = coaches.filter(c=>c.active).map(c=>c.name);
+  sel.innerHTML = '<option value="">— 無代課（原教練授課）—</option>' +
+    coachNames.map(n=>`<option value="${n}">${n}</option>`).join('');
+}
+
+// Called when signin panel is opened / session changes
+function updateSubCoachUI() {
+  buildSubCoachSelect();
+  // Load existing sub-coach for current key
+  const rec = signinRec[curSiKey] || {};
+  const sub = rec._substituteCoach || '';
+  const sel = document.getElementById('sub-coach-sel');
+  if (sel) sel.value = sub;
+  refreshSubCoachBadge(sub);
+}
+
+function refreshSubCoachBadge(name) {
+  const badge = document.getElementById('sub-coach-badge');
+  if (!badge) return;
+  if (name) {
+    badge.style.display = 'inline-block';
+    badge.textContent = '代課：' + name;
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+async function setSubCoach() {
+  const sel = document.getElementById('sub-coach-sel');
+  const name = sel ? sel.value : '';
+  if (!curSiKey) return;
+  if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
+  if (name) {
+    signinRec[curSiKey]._substituteCoach = name;
+  } else {
+    delete signinRec[curSiKey]._substituteCoach;
+  }
+  await saveSignin();
+  refreshSubCoachBadge(name);
+  renderSignin(); // re-render to show sub-coach in stats bar
+}
+
+async function clearSubCoach() {
+  if (!curSiKey) return;
+  if (signinRec[curSiKey]) delete signinRec[curSiKey]._substituteCoach;
+  const sel = document.getElementById('sub-coach-sel');
+  if (sel) sel.value = '';
+  await saveSignin();
+  refreshSubCoachBadge('');
+  renderSignin();
+}
+
+// Patch buildSiSess to also rebuild sub-coach select when session changes
+const _origBuildSiSess = buildSiSess;
+function buildSiSess() {
+  _origBuildSiSess();
+  // rebuild after session changes (setTimeout to allow renderSignin first)
+  setTimeout(updateSubCoachUI, 100);
+}
+
+// Patch renderSignin to show sub-coach info in stats bar and update select
+const _origRenderSignin = renderSignin;
+function renderSignin() {
+  _origRenderSignin();
+  // After render, update sub-coach UI
+  setTimeout(() => {
+    buildSubCoachSelect();
+    const rec = signinRec[curSiKey] || {};
+    const sub = rec._substituteCoach || '';
+    const sel = document.getElementById('sub-coach-sel');
+    if (sel) sel.value = sub;
+    refreshSubCoachBadge(sub);
+  }, 50);
+}
+
+// ── Override coach monthly count to account for substitute coach ───────────
+function renderCoaches() {
+  const body = document.getElementById('coaches-body');
+  if (!coaches.length) { body.innerHTML='<div class="empty">尚無教練資料</div>'; return; }
+
+  const now = new Date();
+  const thisMonth = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+
+  body.innerHTML = coaches.map(c => {
+    const sessCount = sessions.filter(s=>s.coach===c.name).length;
+
+    // Monthly: count as "effective coach" (substitute if set, else original)
+    const monthPresent = Object.entries(signinRec).reduce((acc,[key,rec])=>{
+      const [sessId, date] = key.split('|');
+      if (!date||!date.startsWith(thisMonth)) return acc;
+      const s = getSess(sessId); if (!s) return acc;
+      const effectiveCoach = rec._substituteCoach || s.coach;
+      if (effectiveCoach === c.name)
+        acc += Object.values(rec).filter(v=>v==='present').length;
+      return acc;
+    }, 0);
+
+    // Monthly as sub (代課)
+    const monthAsSub = Object.entries(signinRec).reduce((acc,[key,rec])=>{
+      const [sessId, date] = key.split('|');
+      if (!date||!date.startsWith(thisMonth)) return acc;
+      const s = getSess(sessId); if (!s) return acc;
+      if (rec._substituteCoach === c.name)
+        acc += Object.values(rec).filter(v=>v==='present').length;
+      return acc;
+    }, 0);
+
+    // Total all-time (effective coach)
+    const totalPresent = Object.entries(signinRec).reduce((acc,[key,rec])=>{
+      const sessId = key.split('|')[0];
+      const s = getSess(sessId); if (!s) return acc;
+      const effectiveCoach = rec._substituteCoach || s.coach;
+      if (effectiveCoach === c.name)
+        acc += Object.values(rec).filter(v=>v==='present').length;
+      return acc;
+    }, 0);
+
+    const coachColor = c.color || '#888';
+    return `<div class="coach-card">
+      <div class="coach-avatar" style="background:${coachColor}20;color:${coachColor}">${c.name[0]}</div>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:500">${c.name}
+          <span class="pill ${c.active?'pill-green':'pill-gray'}" style="font-size:10px">${c.active?'授課中':'停用'}</span>
+        </div>
+        <div style="font-size:11px;color:#999;margin-top:2px">${c.role||'教練'}${c.phone?' · '+c.phone:''}</div>
+        <div style="font-size:11px;color:#666;margin-top:4px;display:flex;gap:12px;flex-wrap:wrap">
+          <span>負責班次：<strong>${sessCount}</strong> 堂</span>
+          <span style="color:#27500A">本月出席人次：<strong>${monthPresent}</strong></span>
+          ${monthAsSub>0?`<span style="color:#BA7517">（含代課 ${monthAsSub} 人次）</span>`:''}
+          <span style="color:#aaa;font-size:10px">累計：${totalPresent}</span>
+        </div>
+        ${c.note?`<div style="font-size:11px;color:#aaa;margin-top:2px">${c.note}</div>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditCoach('${c.id}')">編輯</button>
+        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteCoach('${c.id}')">刪除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Override report ① to use effective coach ──────────────────────────────
+function calcReportAtt() {
+  const from   = document.getElementById('att-from')?.value||'';
+  const to     = document.getElementById('att-to')?.value||'';
+  const coachF = document.getElementById('att-coach')?.value||'';
+  const sessF  = document.getElementById('att-sess')?.value||'';
+
+  const rows = [];
+  Object.entries(signinRec).forEach(([key, rec]) => {
+    const [sessId, date] = key.split('|');
+    if (!date) return;
+    if (from && date < from) return;
+    if (to   && date > to)   return;
+    const s = getSess(sessId); if (!s) return;
+
+    // Effective coach = substitute if present, else original
+    const effectiveCoach = rec._substituteCoach || s.coach;
+    const isSubstitute   = !!rec._substituteCoach;
+
+    if (coachF && effectiveCoach !== coachF) return;
+    if (sessF  && sessId !== sessF) return;
+
+    const present = Object.values(rec).filter(v=>v==='present'&&v!=='_substituteCoach').length;
+    const leave   = Object.values(rec).filter(v=>v==='leave').length;
+    if (present+leave === 0) return;
+
+    rows.push({
+      coach: effectiveCoach,
+      origCoach: s.coach,
+      isSubstitute,
+      sessId,
+      sessName: s.name+' '+s.day+' '+s.time,
+      date, present, leave
+    });
+  });
+
+  // Group by effectiveCoach → session
+  const byCoach = {};
+  rows.forEach(r => {
+    if (!byCoach[r.coach]) byCoach[r.coach]={coach:r.coach,sessions:{},totalPresent:0,totalLeave:0,subDates:[]};
+    const g = byCoach[r.coach];
+    if (!g.sessions[r.sessId]) g.sessions[r.sessId]={name:r.sessName,present:0,leave:0,dates:[],subDates:[]};
+    g.sessions[r.sessId].present += r.present;
+    g.sessions[r.sessId].leave   += r.leave;
+    g.sessions[r.sessId].dates.push(r.date);
+    if (r.isSubstitute) g.sessions[r.sessId].subDates.push(r.date);
+    g.totalPresent += r.present;
+    g.totalLeave   += r.leave;
+    if (r.isSubstitute) g.subDates.push(r.date);
+  });
+
+  const totalPresent = Object.values(byCoach).reduce((a,b)=>a+b.totalPresent,0);
+  const totalLeave   = Object.values(byCoach).reduce((a,b)=>a+b.totalLeave,0);
+  const totalSubDates= Object.values(byCoach).reduce((a,b)=>a+b.subDates.length,0);
+
+  if (!Object.keys(byCoach).length) {
+    document.getElementById('att-result').innerHTML='<div class="empty">此區間無出席簽到資料</div>';
+    return;
+  }
+
+  const statsHTML = `<div class="report-stat-grid">
+    <div class="report-stat"><div class="report-stat-val" style="color:#27500A">${totalPresent}</div><div class="report-stat-lbl">總出席人次</div></div>
+    <div class="report-stat"><div class="report-stat-val" style="color:#378ADD">${totalLeave}</div><div class="report-stat-lbl">總請假人次</div></div>
+    <div class="report-stat"><div class="report-stat-val">${Object.keys(byCoach).length}</div><div class="report-stat-lbl">授課教練數</div></div>
+    <div class="report-stat"><div class="report-stat-val" style="color:#BA7517">${totalSubDates}</div><div class="report-stat-lbl">代課堂次</div></div>
+  </div>`;
+
+  const tableRows = Object.values(byCoach).flatMap(g => {
+    const co = getCoach(g.coach)||coaches.find(c=>c.name===g.coach)||{color:'#888'};
+    const sessList = Object.values(g.sessions);
+    return sessList.map((ss, i) => {
+      const subNote = ss.subDates.length ? `<span style="font-size:10px;color:#BA7517;margin-left:4px">（含代課 ${ss.subDates.length} 堂）</span>` : '';
+      return `<tr>
+        ${i===0?`<td rowspan="${sessList.length}" style="font-weight:500;vertical-align:middle">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${co.color||'#888'};margin-right:5px"></span>${g.coach}
+          ${g.subDates.length?`<div style="font-size:10px;color:#BA7517">代課 ${g.subDates.length} 堂</div>`:''}
+        </td>`:''}
+        <td>${ss.name}${subNote}</td>
+        <td>${ss.dates.length} 堂</td>
+        <td style="font-weight:500;color:#27500A">${ss.present}</td>
+        <td style="color:#378ADD">${ss.leave}</td>
+        <td>${ss.present+ss.leave}</td>
+      </tr>`;
+    });
+  }).join('') + `<tr style="font-weight:600;background:#f0f0f0">
+    <td colspan="2"><b>合計</b></td><td></td>
+    <td style="font-weight:600;color:#27500A">${totalPresent}</td>
+    <td style="color:#378ADD">${totalLeave}</td>
+    <td style="font-weight:600">${totalPresent+totalLeave}</td>
+  </tr>`;
+
+  document.getElementById('att-result').innerHTML = statsHTML + `
+    <div style="font-size:11px;color:#BA7517;margin-bottom:8px;padding:6px 10px;background:#FAEEDA;border-radius:8px">
+      ℹ️ 代課統計：當天設有代課教練時，出席人次歸入代課教練，不計入原教練。
+    </div>
+    <div style="overflow-x:auto"><table class="report-table">
+      <thead><tr><th>教練（實際授課）</th><th>課程班次</th><th>授課堂數</th><th>出席人次</th><th>請假人次</th><th>總計</th></tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table></div>`;
+}
+
+// ── Override renderSignin to show substitute notice in stats bar ───────────
+// (We already patched renderSignin above via setTimeout, but also patch stats bar content)
+// We'll inject the sub-coach display by augmenting signinRec display
+// The _substituteCoach key needs to be excluded from present count:
+
+// Patch setSI and setSIQuick to not count _substituteCoach key
+const _origSetSI2 = setSI;
+async function setSI(key, stId, status, termId, sessId) {
+  if (stId === '_substituteCoach') return; // safety guard
+  return _origSetSI2(key, stId, status, termId, sessId);
+}
+
+// Ensure saveSignin stores _substituteCoach correctly (already handled since it's in rec object)
+
+
+// ══════════════════════════════════════════════════════════════════
+// SUBSTITUTE COACH — COMPLETE IMPLEMENTATION
+// Supports: internal coach list + free-text external coach
+// Stats: separate tracking, comparison table, fee calculation
+// ══════════════════════════════════════════════════════════════════
+
+// Substitute log stored separately for history
+let subLog = []; // [{id, sessId, date, origCoach, subCoach, subFee, studentCount, isExternal}]
+
+// Load subLog on init
+const _v3Init = initApp;
+async function initApp() {
+  // call existing initApp
+  showLoading('載入資料…');
+  try {
+    venues=await fsGet('venues'); sessions=await fsGet('sessions'); terms=await fsGet('terms');
+    enrolls=await fsGet('enrolls'); students=await fsGet('students');
+    makeupRec=await fsGet('makeup'); fees=await fsGet('fees'); txns=await fsGet('txns');
+    pricing=await fsGet('pricing'); pendingSubs=await fsGet('pending');
+    coaches=await fsGet('coaches');
+    subLog=await fsGet('sublog');
+    const srSnap=await db.collection('signin').get();
+    signinRec={}; srSnap.docs.forEach(d=>{signinRec[d.id]=d.data();});
+    if(!venues.length){venues=JSON.parse(JSON.stringify(SEED_VENUES));await fsSave('venues',venues);}
+    if(!sessions.length){sessions=JSON.parse(JSON.stringify(SEED_SESSIONS));await fsSave('sessions',sessions);}
+    if(!terms.length){terms=makeSeedTerms();await fsSave('terms',terms);}
+    if(!pricing.length){pricing=JSON.parse(JSON.stringify(SEED_PRICING));await fsSave('pricing',pricing);}
+    if(!coaches.length){
+      coaches=Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
+      await saveCol('coaches',coaches);
+    }
+    document.getElementById('db-st').textContent='✓ Firebase 已連線';
+  } catch(e) {
+    console.error(e);
+    document.getElementById('db-st').textContent='⚠ 離線';
+    venues=JSON.parse(JSON.stringify(SEED_VENUES));sessions=JSON.parse(JSON.stringify(SEED_SESSIONS));
+    terms=makeSeedTerms();pricing=JSON.parse(JSON.stringify(SEED_PRICING));
+    enrolls=[];students=[];signinRec={};makeupRec=[];fees=[];txns=[];pendingSubs=[];
+    coaches=Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
+    subLog=[];
+  }
+  hideLoading();
+  document.getElementById('si-date').value=today();
+  buildSiTerms();buildFeTermFilter();buildRqTermSelect();renderDash();
+}
+
+// ── Patch sw for new panels ──────────────────────────────────────
+function sw(tab, btn) {
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+  document.getElementById('panel-'+tab).classList.add('active');
+  if(btn) btn.classList.add('active');
+  ({
+    dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
+    signin:renderSignin, makeup:renderMakeup, fee:renderFee, students:renderStudents,
+    'reg-qr':renderRegQR, coaches:renderCoaches,
+    reports:()=>showReport('att', document.querySelector('.tab-btn')),
+    'term-att':()=>{}
+  }[tab]||function(){})();
+}
+
+// ── Sub-coach UI helpers ──────────────────────────────────────────
+
+function buildSubCoachSelect() {
+  const sel = document.getElementById('sub-coach-sel');
+  if(!sel) return;
+  const names = coaches.filter(c=>c.active).map(c=>c.name);
+  sel.innerHTML = '<option value="">— 無代課 —</option>' +
+    names.map(n=>`<option value="${n}">${n}（系統教練）</option>`).join('');
+}
+
+function updateSubCoachUI() {
+  buildSubCoachSelect();
+  const rec = signinRec[curSiKey]||{};
+  const sub = rec._substituteCoach||'';
+  const fee = rec._substituteFee||0;
+  const isExt = rec._substituteIsExternal||false;
+
+  const sel   = document.getElementById('sub-coach-sel');
+  const input = document.getElementById('sub-coach-input');
+  const feeEl = document.getElementById('sub-coach-fee');
+
+  if(sub) {
+    if(isExt) { if(input)input.value=sub; if(sel)sel.value=''; }
+    else      { if(sel)sel.value=sub;   if(input)input.value=''; }
+    if(feeEl) feeEl.value=fee||'';
+    showSubCoachConfirmed(sub, fee, isExt);
+  } else {
+    if(sel)sel.value=''; if(input&&!input.value)input.value=''; if(feeEl)feeEl.value='';
+    hideSubCoachConfirmed();
+  }
+}
+
+function onSubCoachSelChange() {
+  const sel = document.getElementById('sub-coach-sel');
+  if(sel&&sel.value) {
+    const input = document.getElementById('sub-coach-input');
+    if(input) input.value=''; // clear free text if list selected
+  }
+}
+
+function onSubCoachInputChange() {
+  const input = document.getElementById('sub-coach-input');
+  if(input&&input.value.trim()) {
+    const sel = document.getElementById('sub-coach-sel');
+    if(sel) sel.value=''; // clear list if free text typed
+  }
+}
+
+async function saveSubCoach() {
+  const sel     = document.getElementById('sub-coach-sel');
+  const input   = document.getElementById('sub-coach-input');
+  const feeEl   = document.getElementById('sub-coach-fee');
+  const selVal  = sel?sel.value:'';
+  const inputVal= input?input.value.trim():'';
+  const subName = selVal || inputVal;
+  const subFee  = parseFloat(feeEl?.value)||0;
+  const isExt   = !selVal && !!inputVal;
+
+  if(!subName) { clearSubCoach(); return; }
+  if(!curSiKey) return;
+  if(!signinRec[curSiKey]) signinRec[curSiKey]={};
+
+  signinRec[curSiKey]._substituteCoach     = subName;
+  signinRec[curSiKey]._substituteFee       = subFee;
+  signinRec[curSiKey]._substituteIsExternal= isExt;
+
+  // Log to subLog for history
+  const s=getSess(curSiSessId);
+  const [,date]=curSiKey.split('|');
+  const existing=subLog.findIndex(x=>x.sessId===curSiSessId&&x.date===date);
+  const entry={id:'sl'+Date.now(),sessId:curSiSessId,date,
+    origCoach:s?s.coach:'',subCoach:subName,subFee,isExternal:isExt,
+    sessName:s?s.name+' '+s.day+' '+s.time:'',createdAt:today()};
+  if(existing>=0) subLog[existing]=entry; else subLog.push(entry);
+
+  await saveSignin();
+  await saveCol('sublog',subLog);
+  showSubCoachConfirmed(subName, subFee, isExt);
+  hint('代課教練已設定 ✓');
+}
+
+async function clearSubCoach() {
+  if(!curSiKey) return;
+  if(signinRec[curSiKey]) {
+    delete signinRec[curSiKey]._substituteCoach;
+    delete signinRec[curSiKey]._substituteFee;
+    delete signinRec[curSiKey]._substituteIsExternal;
+  }
+  const sel=document.getElementById('sub-coach-sel');const input=document.getElementById('sub-coach-input');const feeEl=document.getElementById('sub-coach-fee');
+  if(sel)sel.value=''; if(input)input.value=''; if(feeEl)feeEl.value='';
+  // Remove from subLog
+  const [,date]=curSiKey.split('|');
+  subLog=subLog.filter(x=>!(x.sessId===curSiSessId&&x.date===date));
+  await saveSignin(); await saveCol('sublog',subLog);
+  hideSubCoachConfirmed(); hint('代課已清除');
+}
+
+function showSubCoachConfirmed(name, fee, isExt) {
+  const badge = document.getElementById('sub-coach-badge');
+  const conf  = document.getElementById('sub-coach-confirmed');
+  const nameEl= document.getElementById('sub-coach-confirmed-name');
+  const feeEl = document.getElementById('sub-coach-confirmed-fee');
+  if(badge){badge.style.display='inline-block';badge.textContent='代課：'+name+(isExt?' (外部)':'');}
+  if(conf){conf.style.display='flex';}
+  if(nameEl)nameEl.textContent=name+(isExt?' （外部臨時教練）':'');
+  if(feeEl)feeEl.textContent=fee>0?'  代課費：NT$'+fee.toLocaleString():'';
+}
+function hideSubCoachConfirmed() {
+  const badge=document.getElementById('sub-coach-badge');
+  const conf=document.getElementById('sub-coach-confirmed');
+  if(badge)badge.style.display='none';
+  if(conf)conf.style.display='none';
+}
+
+// Patch buildSiSess to refresh sub UI
+const _v3BuildSiSess = buildSiSess;
+function buildSiSess() {
+  _v3BuildSiSess();
+  setTimeout(updateSubCoachUI, 100);
+}
+
+// Patch renderSignin to refresh sub UI
+const _v3RenderSignin = renderSignin;
+function renderSignin() {
+  _v3RenderSignin();
+  setTimeout(updateSubCoachUI, 80);
+}
+
+// ── Coach card: monthly & substitute stats ────────────────────────
+function renderCoaches() {
+  const body=document.getElementById('coaches-body');
+  if(!coaches.length){body.innerHTML='<div class="empty">尚無教練資料</div>';return;}
+  const now=new Date();
+  const thisMonth=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  body.innerHTML=coaches.map(c=>{
+    const sessCount=sessions.filter(s=>s.coach===c.name).length;
+    // Month: count as effective coach (sub overrides original)
+    let monthPresent=0,monthAsOrig=0,monthAsSub=0;
+    Object.entries(signinRec).forEach(([key,rec])=>{
+      const[sessId,date]=key.split('|');
+      if(!date||!date.startsWith(thisMonth))return;
+      const s=getSess(sessId);if(!s)return;
+      const eff=rec._substituteCoach||s.coach;
+      const cnt=Object.entries(rec).filter(([k,v])=>k!=='_substituteCoach'&&k!=='_substituteFee'&&k!=='_substituteIsExternal'&&v==='present').length;
+      if(eff===c.name){monthPresent+=cnt;}
+      if(s.coach===c.name&&!rec._substituteCoach){monthAsOrig+=cnt;}
+      if(rec._substituteCoach===c.name){monthAsSub+=cnt;}
+    });
+    // Month sub count from subLog
+    const monthSubCount=subLog.filter(x=>x.date&&x.date.startsWith(thisMonth)&&x.subCoach===c.name).length;
+    // Total all-time
+    const totalPresent=Object.entries(signinRec).reduce((acc,[key,rec])=>{
+      const sessId=key.split('|')[0];const s=getSess(sessId);if(!s)return acc;
+      const eff=rec._substituteCoach||s.coach;
+      if(eff===c.name)acc+=Object.entries(rec).filter(([k,v])=>k!=='_substituteCoach'&&k!=='_substituteFee'&&k!=='_substituteIsExternal'&&v==='present').length;
+      return acc;
+    },0);
+    // Total sub times
+    const totalSubCount=subLog.filter(x=>x.subCoach===c.name).length;
+    const coachColor=c.color||'#888';
+    return`<div class="coach-card">
+      <div class="coach-avatar" style="background:${coachColor}20;color:${coachColor}">${c.name[0]}</div>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:500">${c.name}
+          <span class="pill ${c.active?'pill-green':'pill-gray'}" style="font-size:10px">${c.active?'授課中':'停用'}</span>
+        </div>
+        <div style="font-size:11px;color:#999;margin-top:2px">${c.role||'教練'}${c.phone?' · '+c.phone:''}</div>
+        <div style="background:#f8f8f8;border-radius:8px;padding:6px 10px;margin-top:5px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:4px">
+          <div><div style="font-size:10px;color:#999">本月出席人次</div><div style="font-size:14px;font-weight:600;color:#27500A">${monthPresent}</div></div>
+          <div><div style="font-size:10px;color:#999">本月代課堂數</div><div style="font-size:14px;font-weight:600;color:#BA7517">${monthSubCount}</div></div>
+          <div><div style="font-size:10px;color:#999">累計出席（含代課）</div><div style="font-size:13px;font-weight:500;color:#666">${totalPresent}</div></div>
+          <div><div style="font-size:10px;color:#999">累計代課次數</div><div style="font-size:13px;font-weight:500;color:#BA7517">${totalSubCount}</div></div>
+          <div><div style="font-size:10px;color:#999">負責班次</div><div style="font-size:13px;font-weight:500">${sessCount}</div></div>
+        </div>
+        ${c.note?`<div style="font-size:11px;color:#aaa;margin-top:4px">${c.note}</div>`:''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditCoach('${c.id}')">編輯</button>
+        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteCoach('${c.id}')">刪除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Report ①: Attendance with sub comparison & fee calc ──────────
+function calcReportAtt() {
+  const from  =document.getElementById('att-from')?.value||'';
+  const to    =document.getElementById('att-to')?.value||'';
+  const coachF=document.getElementById('att-coach')?.value||'';
+  const sessF =document.getElementById('att-sess')?.value||'';
+
+  // Build rows: each signinRec entry → effective coach
+  const rows=[];
+  Object.entries(signinRec).forEach(([key,rec])=>{
+    const[sessId,date]=key.split('|');if(!date)return;
+    if(from&&date<from)return;if(to&&date>to)return;
+    const s=getSess(sessId);if(!s)return;
+    const eff=rec._substituteCoach||s.coach;
+    const isSub=!!rec._substituteCoach;
+    const subFee=rec._substituteFee||0;
+    const isExt=rec._substituteIsExternal||false;
+    if(coachF&&eff!==coachF)return;
+    if(sessF&&sessId!==sessF)return;
+    const present=Object.entries(rec).filter(([k,v])=>!k.startsWith('_')&&v==='present').length;
+    const leave  =Object.entries(rec).filter(([k,v])=>!k.startsWith('_')&&v==='leave').length;
+    if(present+leave===0)return;
+    rows.push({coach:eff,origCoach:s.coach,isSub,subFee,isExt,sessId,sessName:s.name+' '+s.day+' '+s.time,date,present,leave});
+  });
+
+  // Group by effectiveCoach
+  const byCoach={};
+  rows.forEach(r=>{
+    if(!byCoach[r.coach])byCoach[r.coach]={coach:r.coach,sessions:{},totalPresent:0,totalLeave:0,subSessions:[],totalSubFee:0};
+    const g=byCoach[r.coach];
+    if(!g.sessions[r.sessId])g.sessions[r.sessId]={name:r.sessName,present:0,leave:0,classDates:[],subDates:[],subFeeTotal:0};
+    const ss=g.sessions[r.sessId];
+    ss.present+=r.present;ss.leave+=r.leave;ss.classDates.push(r.date);
+    g.totalPresent+=r.present;g.totalLeave+=r.leave;
+    if(r.isSub){ss.subDates.push(r.date);ss.subFeeTotal+=r.subFee*r.present;g.totalSubFee+=r.subFee*r.present;g.subSessions.push({date:r.date,sessName:r.sessName,present:r.present,subFee:r.subFee,isExt:r.isExt,origCoach:r.origCoach});}
+  });
+
+  const totalPresent=Object.values(byCoach).reduce((a,b)=>a+b.totalPresent,0);
+  const totalLeave  =Object.values(byCoach).reduce((a,b)=>a+b.totalLeave,0);
+  const totalSubFee =Object.values(byCoach).reduce((a,b)=>a+b.totalSubFee,0);
+
+  if(!Object.keys(byCoach).length){document.getElementById('att-result').innerHTML='<div class="empty">此區間無出席簽到資料</div>';return;}
+
+  // Stats
+  const statsHTML=`<div class="report-stat-grid">
+    <div class="report-stat"><div class="report-stat-val" style="color:#27500A">${totalPresent}</div><div class="report-stat-lbl">總出席人次</div></div>
+    <div class="report-stat"><div class="report-stat-val" style="color:#378ADD">${totalLeave}</div><div class="report-stat-lbl">總請假人次</div></div>
+    <div class="report-stat"><div class="report-stat-val">${Object.keys(byCoach).length}</div><div class="report-stat-lbl">實際授課教練</div></div>
+    <div class="report-stat"><div class="report-stat-val" style="color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'NT$0'}</div><div class="report-stat-lbl">代課費合計</div></div>
+  </div>`;
+
+  // Main table
+  const mainRows=Object.values(byCoach).flatMap(g=>{
+    const co=coaches.find(c=>c.name===g.coach)||{color:'#888'};
+    const sl=Object.values(g.sessions);
+    return sl.map((ss,i)=>{
+      const subNote=ss.subDates.length?`<span style="font-size:10px;color:#BA7517;background:#FAEEDA;padding:1px 5px;border-radius:5px;margin-left:4px">代課 ${ss.subDates.length} 堂</span>`:'';
+      return`<tr>
+        ${i===0?`<td rowspan="${sl.length}" style="font-weight:500;vertical-align:middle;white-space:nowrap">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${co.color||'#888'};margin-right:4px"></span>${g.coach}
+          ${g.subSessions.length?`<div style="font-size:10px;color:#BA7517">本期代課${g.subSessions.length}場</div>`:''}
+        </td>`:''}
+        <td>${ss.name}${subNote}</td>
+        <td style="text-align:center">${ss.classDates.length}</td>
+        <td style="text-align:center;font-weight:500;color:#27500A">${ss.present}</td>
+        <td style="text-align:center;color:#378ADD">${ss.leave}</td>
+        <td style="text-align:center">${ss.present+ss.leave}</td>
+      </tr>`;
+    });
+  }).join('');
+
+  // Sub comparison table
+  const allSubRows=rows.filter(r=>r.isSub).sort((a,b)=>b.date.localeCompare(a.date));
+  const subTableHTML=allSubRows.length?`
+    <div style="margin-top:16px;font-size:13px;font-weight:500;margin-bottom:8px;display:flex;align-items:center;gap:8px">
+      🔄 代課明細對照表
+      <span style="font-size:11px;font-weight:400;color:#666">（原教練 vs 實際授課教練）</span>
+    </div>
+    <div style="overflow-x:auto"><table class="report-table">
+      <thead><tr><th>日期</th><th>課程班次</th><th>原教練</th><th>代課教練</th><th>類型</th><th>出席人次</th><th>代課費/人</th><th>代課費小計</th></tr></thead>
+      <tbody>${allSubRows.map(r=>`<tr>
+        <td style="white-space:nowrap">${r.date}</td>
+        <td>${r.sessName}</td>
+        <td style="color:#999">${r.origCoach}</td>
+        <td style="font-weight:500;color:#BA7517">${r.coach}</td>
+        <td><span style="font-size:10px;padding:2px 6px;border-radius:6px;background:${r.isExt?'#FCEBEB':'#E6F1FB'};color:${r.isExt?'#501313':'#0C447C'}">${r.isExt?'外部':'系統教練'}</span></td>
+        <td style="text-align:center;font-weight:500">${r.present}</td>
+        <td style="text-align:center">${r.subFee?'NT$'+r.subFee.toLocaleString():'—'}</td>
+        <td style="text-align:center;font-weight:500;color:#BA7517">${r.subFee?'NT$'+(r.subFee*r.present).toLocaleString():'—'}</td>
+      </tr>`).join('')}
+      <tr style="font-weight:600;background:#f0f0f0"><td colspan="5">代課合計</td><td style="text-align:center">${allSubRows.reduce((a,b)=>a+b.present,0)}</td><td></td><td style="text-align:center;color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'—'}</td></tr>
+      </tbody>
+    </table></div>`:'';
+
+  document.getElementById('att-result').innerHTML=statsHTML+`
+    <div style="font-size:11px;color:#666;margin-bottom:8px;padding:6px 10px;background:#f8f8f8;border-radius:8px">
+      ℹ️ 下表以「實際授課教練」統計，代課日的出席人次歸入代課教練，不計原教練。
+    </div>
+    <div style="overflow-x:auto"><table class="report-table">
+      <thead><tr><th>實際授課教練</th><th>課程班次</th><th>授課堂數</th><th>出席人次</th><th>請假人次</th><th>總計</th></tr></thead>
+      <tbody>${mainRows}</tbody>
+    </table></div>
+    ${subTableHTML}`;
 }
 
 </script>
