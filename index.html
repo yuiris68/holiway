@@ -455,6 +455,11 @@ auth.onAuthStateChanged(user=>{
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app-screen').style.display='block';
     document.getElementById('user-email').textContent=user.email;
+    // Show loading state immediately, initApp will re-render with real data
+    const dm = document.getElementById('dash-metrics');
+    const db2 = document.getElementById('dash-body');
+    if(dm) dm.innerHTML='<div class="mc"><div class="mc-lbl">登入成功</div><div class="mc-val" style="font-size:13px;color:#aaa">資料載入中...</div></div>';
+    if(db2) db2.innerHTML='<div style="color:#aaa;font-size:12px;padding:20px">Firebase 資料同步中，請稍候...</div>';
     initApp();
   }else{
     document.getElementById('login-screen').style.display='flex';
@@ -567,13 +572,7 @@ function enrollBar(e,c,w=0){const p=Math.min(100,Math.round(e/c*100));const f=e>
 
 // ── DASH ─────────────────────────────────────────────
 function renderDash(){
-  // If no data yet, show brief loading state (initApp will call renderDash again)
-  if(!venues.length && !sessions.length && !terms.length){
-    document.getElementById('dash-metrics').innerHTML=
-      '<div class="mc"><div class="mc-lbl" style="font-size:12px;color:#aaa">資料載入中，請稍候...</div></div>';
-    document.getElementById('dash-body').innerHTML='';
-    return;
-  }
+
   const activeTerm=terms.find(t=>termStatus(t).key==='active');
   const totalOwed=fees.filter(f=>f.status!=='refunded').reduce((a,f)=>a+feeStatus(f).bal,0);
   const todaySignins=Object.entries(signinRec).filter(([k])=>k.includes('|'+today())).reduce((a,[,r])=>a+Object.values(r).filter(v=>v==='present').length,0);
