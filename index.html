@@ -181,6 +181,15 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 </head>
 <body>
 
+<!-- PARENT REGISTRATION PAGE (no login needed, activated by ?mode=register) -->
+<div id="parent-reg-page" style="display:none;min-height:100vh;background:#f5f5f5;padding:0 0 40px">
+  <div style="background:var(--pink);padding:14px 16px;text-align:center">
+    <div style="font-size:18px;font-weight:600;color:#fff">哈樂維運動倉庫</div>
+    <div style="font-size:12px;color:rgba(255,255,255,.85);margin-top:2px">課程報名</div>
+  </div>
+  <div id="parent-reg-content" style="max-width:480px;margin:0 auto;padding:16px 12px"></div>
+</div>
+
 <!-- LOGIN -->
 <div id="login-screen">
   <div class="login-box">
@@ -424,6 +433,20 @@ async function doLogin(){
 }
 document.getElementById('login-password').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 function doLogout(){if(confirm('確認登出？'))auth.signOut();}
+
+// ── URL param detection: show parent form without login ──────────────
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const mode   = params.get('mode');
+  const termId = params.get('term');
+  if (mode === 'register') {
+    // Hide login, show parent reg page immediately
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('parent-reg-page').style.display = 'block';
+    // Load Firebase data needed for the form, then render
+    initParentRegPage(termId);
+  }
+})();
 
 auth.onAuthStateChanged(user=>{
   if(user){
@@ -2708,6 +2731,260 @@ function calcReportAtt() {
       <tbody>${mainRows}</tbody>
     </table></div>
     ${subTableHTML}`;
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+// PARENT REGISTRATION PAGE (standalone, no login required)
+// Triggered by: ?mode=register&term=TERM_ID
+// ══════════════════════════════════════════════════════════════════
+
+async function initParentRegPage(termId) {
+  const content = document.getElementById('parent-reg-content');
+  content.innerHTML = '<div style="text-align:center;padding:40px;color:#999">載入中...</div>';
+
+  try {
+    // Load minimal data needed
+    terms    = await fsGet('terms');
+    sessions = await fsGet('sessions');
+    venues   = await fsGet('venues');
+    pricing  = await fsGet('pricing');
+    enrolls  = await fsGet('enrolls');
+  } catch(e) {
+    content.innerHTML = '<div style="text-align:center;padding:30px;color:#A32D2D">資料載入失敗，請重新掃描 QR Code</div>';
+    return;
+  }
+
+  if (termId) {
+    renderParentRegForm(termId);
+  } else {
+    // Show term selection if no termId in URL
+    const termList = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
+    content.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:12px;text-align:center">
+        <div style="font-size:16px;font-weight:500;margin-bottom:16px">請選擇報名期別</div>
+        ${termList.map(t=>`
+          <button onclick="renderParentRegForm('${t.id}')"
+            style="width:100%;padding:12px;margin-bottom:8px;border-radius:10px;border:0.5px solid #e0e0e0;background:#fff;font-size:14px;cursor:pointer;text-align:left">
+            <div style="font-weight:500">${t.name}</div>
+            <div style="font-size:12px;color:#999;margin-top:2px">上課：${fmtD(t.startDate)} — ${fmtD(t.endDate)}</div>
+          </button>`).join('')}
+      </div>`;
+  }
+}
+
+function renderParentRegForm(termId) {
+  const content = document.getElementById('parent-reg-content');
+  const t = terms.find(x=>x.id===termId);
+  if (!t) {
+    content.innerHTML = '<div style="text-align:center;padding:30px;color:#A32D2D">找不到此期別，請重新掃描 QR Code</div>';
+    return;
+  }
+
+  const termSessions = sessions
+    .filter(s=>t.sessions&&t.sessions.includes(s.id))
+    .sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9));
+
+  const sessDates = t.sessionDates || {};
+
+  content.innerHTML = `
+    <!-- Term header -->
+    <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px;text-align:center">
+      <div style="font-size:16px;font-weight:600;color:var(--pink)">${t.name}</div>
+      <div style="font-size:12px;color:#666;margin-top:4px">上課期間：${fmtD(t.startDate)} — ${fmtD(t.endDate)}</div>
+      <div style="font-size:11px;color:#999;margin-top:2px">報名截止：${fmtD(t.enrollEndDate)||'—'}</div>
+    </div>
+
+    <!-- Child info -->
+    <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:500;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--pink-lt);color:var(--pink);display:flex;align-items:center;justify-content:center;font-size:12px">1</span>
+        孩子資料
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">孩子姓名 *</label>
+        <input type="text" id="preg-cn" placeholder="請輸入孩子姓名"
+          style="width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:10px;font-size:15px;outline:none">
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">性別</label>
+        <div style="display:flex;gap:8px">
+          <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px 12px;border:1px solid #ddd;border-radius:10px;cursor:pointer;margin-bottom:0">
+            <input type="radio" name="preg-gender" value="male" style="width:auto;accent-color:var(--blue)"> <span style="font-size:14px">♂ 男生</span>
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:6px;padding:10px 12px;border:1px solid #ddd;border-radius:10px;cursor:pointer;margin-bottom:0">
+            <input type="radio" name="preg-gender" value="female" style="width:auto;accent-color:var(--pink)"> <span style="font-size:14px">♀ 女生</span>
+          </label>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div>
+          <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">年齡（歲）</label>
+          <input type="number" id="preg-ageY" placeholder="歲" min="0" max="18"
+            style="width:100%;padding:11px 10px;border:1px solid #ddd;border-radius:10px;font-size:15px;outline:none">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">年齡（月）</label>
+          <input type="number" id="preg-ageM" placeholder="月" min="0" max="11"
+            style="width:100%;padding:11px 10px;border:1px solid #ddd;border-radius:10px;font-size:15px;outline:none">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">身高（cm）</label>
+          <input type="number" id="preg-height" placeholder="cm" min="50" max="200"
+            style="width:100%;padding:11px 10px;border:1px solid #ddd;border-radius:10px;font-size:15px;outline:none">
+        </div>
+      </div>
+    </div>
+
+    <!-- Parent info -->
+    <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:500;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--pink-lt);color:var(--pink);display:flex;align-items:center;justify-content:center;font-size:12px">2</span>
+        家長資料
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">家長姓名 *</label>
+        <input type="text" id="preg-pn" placeholder="請輸入家長姓名"
+          style="width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:10px;font-size:15px;outline:none">
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">聯絡電話 *</label>
+        <input type="tel" id="preg-phone" placeholder="手機號碼"
+          style="width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:10px;font-size:15px;outline:none">
+      </div>
+      <div style="margin-bottom:4px">
+        <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">家長 LINE ID（選填）</label>
+        <input type="text" id="preg-line" placeholder="LINE ID"
+          style="width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:10px;font-size:15px;outline:none">
+      </div>
+    </div>
+
+    <!-- Course selection -->
+    <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:500;margin-bottom:4px;display:flex;align-items:center;gap:6px">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--pink-lt);color:var(--pink);display:flex;align-items:center;justify-content:center;font-size:12px">3</span>
+        選擇上課課程
+      </div>
+      <div style="font-size:11px;color:#999;margin-bottom:12px">可選擇一個或多個課程</div>
+      ${termSessions.map(s => {
+        const v = getVenue(s.venueId);
+        const cnt = enrolls.filter(e=>e.termId===termId&&e.sessionId===s.id&&e.status==='enrolled').length;
+        const isFull = cnt >= s.capacity;
+        const pr = pricing.find(p=>p.sessId===s.id);
+        const sd = sessDates[s.id] || {};
+        return `<label style="display:flex;align-items:flex-start;gap:12px;padding:12px;border:1px solid ${isFull?'#f0f0f0':'#e0e0e0'};border-radius:10px;margin-bottom:8px;cursor:${isFull?'not-allowed':'pointer'};background:${isFull?'#fafafa':'#fff'}">
+          <input type="checkbox" class="preg-sess-check" value="${s.id}" data-lessons="${s.periodLessons}" ${isFull?'disabled':''} onchange="pregUpdateLessons()"
+            style="width:18px;height:18px;margin-top:3px;accent-color:var(--pink);flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:500;color:${isFull?'#aaa':'#1a1a1a'}">${s.name}</div>
+            <div style="font-size:12px;color:#666;margin-top:2px">${s.day} ${s.time} · ${s.coach} 教練${v?' · '+v.name:''}</div>
+            ${sd.start?`<div style="font-size:11px;color:#378ADD;margin-top:2px">📅 ${fmtD(sd.start)} — ${fmtD(sd.end)}</div>`:''}
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap">
+              <span style="font-size:10px;padding:2px 7px;border-radius:6px;background:${isFull?'#FCEBEB':'#EAF3DE'};color:${isFull?'#501313':'#27500A'}">${isFull?'已滿班':cnt+'/'+s.capacity+' 人'}</span>
+              <span style="font-size:11px;color:#666">${s.periodLessons} 堂/期</span>
+              ${pr?`<span style="font-size:11px;font-weight:500;color:#27500A;padding:2px 7px;border-radius:6px;background:#EAF3DE;border:0.5px solid #C0DD97">NT$${pr.price.toLocaleString()}</span>`:''}
+            </div>
+          </div>
+        </label>`;
+      }).join('')}
+      <div id="preg-lessons-display" style="display:none;padding:10px 12px;background:#EAF3DE;border-radius:10px;border:0.5px solid #C0DD97;margin-top:4px">
+        <div style="font-size:12px;color:#27500A">已選課程</div>
+        <div id="preg-lessons-val" style="font-size:16px;font-weight:600;color:#27500A;margin-top:2px"></div>
+        <div id="preg-lessons-detail" style="font-size:11px;color:#3B6D11;margin-top:2px"></div>
+      </div>
+    </div>
+
+    <!-- Note -->
+    <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:14px;font-weight:500;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+        <span style="width:22px;height:22px;border-radius:50%;background:var(--pink-lt);color:var(--pink);display:flex;align-items:center;justify-content:center;font-size:12px">4</span>
+        備註（選填）
+      </div>
+      <textarea id="preg-note" placeholder="如過敏史、特殊需求等"
+        style="width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:10px;font-size:14px;outline:none;height:80px;resize:none"></textarea>
+    </div>
+
+    <!-- Submit -->
+    <button onclick="submitParentReg('${termId}')"
+      style="width:100%;padding:15px;background:var(--pink);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:8px">
+      送出報名資料
+    </button>
+    <div style="text-align:center;font-size:11px;color:#aaa;padding-bottom:20px">
+      資料送出後，工作人員審核後將與您聯繫確認
+    </div>`;
+}
+
+function pregUpdateLessons() {
+  const checked = Array.from(document.querySelectorAll('.preg-sess-check:checked'));
+  const sel     = checked.map(c=>sessions.find(s=>s.id===c.value)).filter(Boolean);
+  const disp    = document.getElementById('preg-lessons-display');
+  const val     = document.getElementById('preg-lessons-val');
+  const det     = document.getElementById('preg-lessons-detail');
+  if (!sel.length) { disp.style.display='none'; return; }
+  const max = Math.max(...sel.map(s=>s.periodLessons));
+  disp.style.display = 'block';
+  val.textContent  = max + ' 堂/期';
+  det.textContent  = '選擇：' + sel.map(s=>s.name+' ('+s.periodLessons+'堂)').join('、');
+}
+
+async function submitParentReg(termId) {
+  const childName  = document.getElementById('preg-cn').value.trim();
+  const parentName = document.getElementById('preg-pn').value.trim();
+  const phone      = document.getElementById('preg-phone').value.trim();
+  const genderEl   = document.querySelector('input[name="preg-gender"]:checked');
+  const gender     = genderEl ? genderEl.value : '';
+  const sessionIds = Array.from(document.querySelectorAll('.preg-sess-check:checked')).map(c=>c.value);
+
+  // Validation
+  if (!childName)        { alert('請填寫孩子姓名');   return; }
+  if (!parentName)       { alert('請填寫家長姓名');   return; }
+  if (!phone)            { alert('請填寫聯絡電話');   return; }
+  if (!sessionIds.length){ alert('請至少選擇一個課程'); return; }
+
+  const sel = sessionIds.map(id=>sessions.find(s=>s.id===id)).filter(Boolean);
+  const autoLessons = Math.max(...sel.map(s=>s.periodLessons));
+
+  const sub = {
+    id: 'ps'+Date.now(),
+    termId,
+    childName, parentName, phone, gender,
+    ageY:    parseInt(document.getElementById('preg-ageY').value)||0,
+    ageM:    parseInt(document.getElementById('preg-ageM').value)||0,
+    height:  parseFloat(document.getElementById('preg-height').value)||0,
+    lineId:  document.getElementById('preg-line').value.trim(),
+    sessionIds, autoLessons,
+    note:    document.getElementById('preg-note').value.trim(),
+    status:  'pending',
+    submittedAt: new Date().toLocaleString('zh-TW',{hour12:false})
+  };
+
+  // Disable button to prevent double-submit
+  const btn = document.querySelector('#parent-reg-content button[onclick]');
+  if (btn) { btn.disabled=true; btn.textContent='送出中...'; }
+
+  try {
+    await db.collection('pending').doc(sub.id).set(sub);
+    // Show success
+    document.getElementById('parent-reg-content').innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:40px 24px;text-align:center;margin-top:20px">
+        <div style="font-size:56px;margin-bottom:16px">✅</div>
+        <div style="font-size:20px;font-weight:600;color:#27500A;margin-bottom:8px">報名資料已送出！</div>
+        <div style="font-size:13px;color:#666;line-height:1.8">
+          孩子：<strong>${childName}</strong><br>
+          課程：${sel.map(s=>s.name).join('、')}<br>
+          每期堂數：${autoLessons} 堂<br>
+          <br>工作人員確認後會盡快與您聯繫。<br>感謝您的報名！
+        </div>
+        <button onclick="renderParentRegForm('${termId}')"
+          style="margin-top:20px;padding:12px 24px;background:#f0f0f0;border:none;border-radius:10px;font-size:14px;cursor:pointer;color:#666">
+          再填一份
+        </button>
+      </div>`;
+  } catch(e) {
+    console.error(e);
+    alert('送出失敗，請檢查網路連線後重試');
+    if (btn) { btn.disabled=false; btn.textContent='送出報名資料'; }
+  }
 }
 
 </script>
