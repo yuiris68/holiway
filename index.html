@@ -1186,65 +1186,111 @@ function showStudentRegQR() {
 }
 function dlStuQR(){const c=document.getElementById('stu-qr-cv');if(!c)return;const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='學生報名QR.png';a.click();}
 
+
+// ── Show all terms' QR codes (default view) ──────────────────────
+function showAllRegQR() {
+  const allTerms = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
+  const body = document.getElementById('reg-qr-body');
+
+  if (!allTerms.length) {
+    body.innerHTML = '<div class="empty">尚無期別資料，請先在「期別/報名」新增期別</div>';
+    return;
+  }
+
+  body.innerHTML = allTerms.map((t,i) => {
+    const url = window.location.href.split('?')[0] + '?mode=register&term=' + t.id;
+    const st  = termStatus(t);
+    const sessCount = (t.sessions||[]).length;
+    return `<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${t.name}</div>
+          <div style="font-size:11px;color:#999;margin-top:1px">
+            上課：${fmtD(t.startDate)} — ${fmtD(t.endDate)} · ${sessCount} 班次
+          </div>
+        </div>
+        <span class="pill ${pillCls(st.key)}">${st.label}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start">
+        <canvas id="all-qr-${i}" width="110" height="110"
+          style="border-radius:8px;background:#fff;padding:5px;display:block;border:0.5px solid #e0e0e0"></canvas>
+        <div>
+          <div style="font-size:10px;color:#999;word-break:break-all;margin-bottom:8px">${url}</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button class="btn btn-outline" style="font-size:11px;padding:4px 10px"
+              onclick="dlQRById('all-qr-${i}','${t.name}_報名QR')">⬇ 下載 QR</button>
+            <button class="btn btn-pink" style="font-size:11px;padding:4px 10px"
+              onclick="previewParentForm('${t.id}')">預覽填表頁</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Render QR codes after DOM is ready
+  setTimeout(() => {
+    allTerms.forEach((t, i) => {
+      const canvas = document.getElementById('all-qr-' + i);
+      if (!canvas) return;
+      const url = window.location.href.split('?')[0] + '?mode=register&term=' + t.id;
+      try { new QRious({element:canvas, value:url, size:110, foreground:'#1a1a1a', background:'#ffffff'}); } catch(e){}
+    });
+  }, 50);
+
+  // Show pending for ALL terms
+  const pSec = document.getElementById('reg-pending-section');
+  const aSec = document.getElementById('reg-approved-section');
+  if (pSec) pSec.style.display = 'block';
+  if (aSec) aSec.style.display = 'block';
+
+  const allPending  = pendingSubs.filter(p => p.status === 'pending');
+  const allApproved = pendingSubs.filter(p => p.status === 'approved');
+
+  const pcEl = document.getElementById('reg-pending-count');
+  if (pcEl) pcEl.textContent = allPending.length + ' 筆';
+
+  const plEl = document.getElementById('reg-pending-list');
+  if (plEl) plEl.innerHTML = allPending.length
+    ? allPending.map(p => { const t = terms.find(x=>x.id===p.termId)||{name:'—'}; return renderPendingCard(p,t); }).join('')
+    : '<div class="empty">目前沒有待審核報名</div>';
+
+  const alEl = document.getElementById('reg-approved-list');
+  if (alEl) alEl.innerHTML = allApproved.length
+    ? `<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden">
+        <table class="tbl">
+          <colgroup><col style="width:14%"><col style="width:14%"><col style="width:8%"><col style="width:10%"><col style="width:32%"><col style="width:22%"></colgroup>
+          <thead><tr><th>期別</th><th>學生</th><th>性別</th><th>年齡</th><th>選擇課程</th><th>家長</th></tr></thead>
+          <tbody>${allApproved.map(p => {
+            const t = terms.find(x=>x.id===p.termId)||{name:'—'};
+            return `<tr>
+              <td>${t.name}</td>
+              <td style="font-weight:500">${p.childName}</td>
+              <td>${p.gender==='male'?'♂ 男':'♀ 女'}</td>
+              <td>${fmtAge(p.ageY,p.ageM)}</td>
+              <td>${(p.sessionIds||[]).map(sid=>{const s=getSess(sid);return s?`<span class="badge ${s.type}">${s.name}</span> `:''}).join('')}</td>
+              <td>${p.parentName}${p.lineId?' · '+p.lineId:''}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`
+    : '<div class="empty">尚無已審核報名</div>';
+}
+
 function renderRegQR() {
-  // Read value FIRST before rebuilding (rebuilding resets the selection)
+  // Rebuild select while preserving selection
   const sel = document.getElementById('rq-term');
   const termId = sel ? sel.value : '';
-  // Rebuild select options while preserving current selection
   buildRqTermSelect();
-  // Restore the selected value after rebuild
   if (termId && sel) sel.value = termId;
+  // If no term selected, show ALL terms automatically
+  if (!termId) { showAllRegQR(); return; }
   const pending  = pendingSubs.filter(p=>p.termId===termId&&p.status==='pending');
   const approved = pendingSubs.filter(p=>p.termId===termId&&p.status==='approved');
   const pSec = document.getElementById('reg-pending-section');
   const aSec = document.getElementById('reg-approved-section');
   pSec.style.display = termId ? 'block' : 'none';
   aSec.style.display = termId ? 'block' : 'none';
-  if (!termId) {
-    // Show all active/enrolling terms when none selected
-    const allTerms = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
-    if (!allTerms.length) { document.getElementById('reg-qr-body').innerHTML='<div class="empty">尚無期別資料</div>'; return; }
-    document.getElementById('reg-qr-body').innerHTML = allTerms.map((t,i)=>{
-      const url = window.location.href.split('?')[0]+'?mode=register&term='+t.id;
-      const st  = termStatus(t);
-      return `<div class="card" style="margin-bottom:10px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:500">${t.name}</div>
-            <div style="font-size:11px;color:#999">${fmtD(t.startDate)} — ${fmtD(t.endDate)}</div>
-          </div>
-          <span class="pill ${pillCls(st.key)}">${st.label}</span>
-        </div>
-        <div class="qr-grid">
-          <canvas id="all-qr-cv-${i}" width="100" height="100" style="border-radius:8px;background:#fff;padding:4px;display:block"></canvas>
-          <div>
-            <div style="font-size:10px;color:#999;word-break:break-all;margin-bottom:6px">${url}</div>
-            <div style="display:flex;gap:5px;flex-wrap:wrap">
-              <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="dlQRById('all-qr-cv-${i}','${t.name}')">下載 QR</button>
-              <button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="previewParentForm('${t.id}')">預覽填表頁</button>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-    // Render all QR codes after HTML is set
-    allTerms.forEach((t,i)=>{
-      try{ new QRious({element:document.getElementById('all-qr-cv-'+i),value:window.location.href.split('?')[0]+'?mode=register&term='+t.id,size:100,foreground:'#1a1a1a',background:'#ffffff'}); }catch(e){}
-    });
-    // Still show pending section for all terms
-    const allPending  = pendingSubs.filter(p=>p.status==='pending');
-    const allApproved = pendingSubs.filter(p=>p.status==='approved');
-    document.getElementById('reg-pending-section').style.display = 'block';
-    document.getElementById('reg-approved-section').style.display = 'block';
-    document.getElementById('reg-pending-count').textContent = allPending.length+' 筆';
-    document.getElementById('reg-pending-list').innerHTML = allPending.length
-      ? allPending.map(p=>{ const t=terms.find(x=>x.id===p.termId)||{name:'—'}; return renderPendingCard(p,t); }).join('')
-      : '<div class="empty">目前沒有待審核報名</div>';
-    document.getElementById('reg-approved-list').innerHTML = allApproved.length
-      ? `<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden"><table class="tbl"><colgroup><col style="width:15%"><col style="width:15%"><col style="width:10%"><col style="width:10%"><col style="width:30%"><col style="width:20%"></colgroup><thead><tr><th>期別</th><th>學生</th><th>性別</th><th>年齡</th><th>選擇課程</th><th>家長</th></tr></thead><tbody>${allApproved.map(p=>{const t=terms.find(x=>x.id===p.termId)||{name:'—'};return`<tr><td>${t.name}</td><td style="font-weight:500">${p.childName}</td><td>${p.gender==='male'?'♂ 男':'♀ 女'}</td><td>${fmtAge(p.ageY,p.ageM)}</td><td>${(p.sessionIds||[]).map(sid=>{const s=getSess(sid);return s?`<span class="badge ${s.type}">${s.name}</span> `:''}).join('')}</td><td>${p.parentName}${p.lineId?' · '+p.lineId:''}</td></tr>`;}).join('')}</tbody></table></div>`
-      : '<div class="empty">尚無已審核報名</div>';
-    return;
-  }
+
 
   const t = terms.find(x=>x.id===termId);
   const url = window.location.href.split('?')[0]+'?mode=register&term='+termId;
@@ -2485,7 +2531,7 @@ function sw(tab, btn) {
   ({
     dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
     signin:renderSignin, makeup:renderMakeup, fee:renderFee, students:renderStudents,
-    'reg-qr':renderRegQR, coaches:renderCoaches,
+    'reg-qr':()=>{ buildRqTermSelect(); renderRegQR(); }, coaches:renderCoaches,
     reports:()=>showReport('att', document.querySelector('.tab-btn')),
     'term-att':()=>{}
   }[tab]||function(){})();
