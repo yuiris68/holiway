@@ -231,7 +231,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
       <button class="nb" onclick="sw('makeup',this)">補課</button>
       <button class="nb" onclick="sw('fee',this)">學費</button>
       <button class="nb" onclick="sw('students',this)">學生</button>
-      <button class="nb" onclick="sw('coaches',this)" style="background:#E6F1FB;color:#0C447C;border-color:#378ADD">教練</button>
+      <button class="nb" onclick="console.log('coach btn clicked');sw('coaches',this)" style="background:#E6F1FB;color:#0C447C;border-color:#378ADD">教練</button>
       <button class="nb" onclick="sw('reports',this)" style="background:#EEEDFE;color:#3C3489;border-color:#7F77DD">報表</button>
     </nav>
     <div class="user-area">
@@ -464,6 +464,13 @@ function doLogout(){if(confirm('確認登出？'))auth.signOut();}
   }
 })();
 
+window.onerror = function(msg, src, line, col, err) {
+  console.error('GLOBAL ERROR:', msg, 'at line', line, err);
+  return false;
+};
+window.addEventListener('DOMContentLoaded', function(){
+  console.log('[BOOT] sw defined:', typeof sw, '/ coaches:', typeof coaches);
+});
 auth.onAuthStateChanged(user=>{
   // Never interfere if in parent registration mode
   if(new URLSearchParams(window.location.search).get('mode')==='register') return;
