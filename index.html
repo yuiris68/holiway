@@ -1830,10 +1830,12 @@ async function deleteCoach(id) {
 let currentReportType = 'att';
 
 function showReport(type, btn) {
+  console.log('[showReport] type='+type+' btn='+!!btn);
   currentReportType = type;
   if(btn) { document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
   const body = document.getElementById('report-body');
-  if (!body) return;
+  if (!body) { console.error('[showReport] report-body not found!'); return; }
+  console.log('[showReport] body found, calling render...');
   switch(type) {
     case 'att':        renderReportAtt(body); break;
     case 'term-enroll':renderReportTermEnroll(body); break;
@@ -2268,15 +2270,24 @@ async function initApp() {
 function sw(tab, btn) {
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
-  document.getElementById('panel-'+tab).classList.add('active');
+  const panelEl = document.getElementById('panel-'+tab);
+  if(!panelEl){ console.error('sw: panel not found: panel-'+tab); return; }
+  panelEl.classList.add('active');
   if(btn) btn.classList.add('active');
-  ({
-    dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
-    signin:renderSignin, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
-    'reg-qr':()=>{ buildRqTermSelect(); renderRegQR(); }, coaches:renderCoaches,
-    reports:()=>showReport('att', document.querySelector('.tab-btn')),
-    'term-att':()=>{}
-  }[tab]||function(){})();
+  console.log('[sw] tab='+tab+' coaches.length='+coaches.length+' panel found='+!!panelEl);
+  try {
+    ({
+      dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
+      signin:renderSignin, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
+      'reg-qr':()=>{ buildRqTermSelect(); renderRegQR(); }, coaches:renderCoaches,
+      reports:()=>showReport('att', document.querySelector('.tab-btn')),
+      'term-att':()=>{}
+    }[tab]||function(){})();
+  } catch(e) {
+    console.error('[sw] Error rendering tab '+tab+':', e);
+    const body = document.getElementById(tab+'-body') || document.getElementById('report-body');
+    if(body) body.innerHTML = '<div style="color:red;padding:20px">錯誤：'+e.message+'</div>';
+  }
 }
 
 // ── Sub-coach UI helpers ──────────────────────────────────────────
@@ -2409,8 +2420,10 @@ function renderSignin() {
 
 // ── Coach card: monthly & substitute stats ────────────────────────
 function renderCoaches() {
+  console.log('[renderCoaches] coaches.length='+coaches.length);
   const body=document.getElementById('coaches-body');
-  if(!coaches.length){body.innerHTML='<div class="empty">尚無教練資料</div>';return;}
+  if(!body){console.error('[renderCoaches] coaches-body not found!');return;}
+  if(!coaches.length){body.innerHTML='<div class="empty">尚無教練資料（請先在「教練」頁新增）</div>';return;}
   const now=new Date();
   const thisMonth=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
   body.innerHTML=coaches.map(c=>{
