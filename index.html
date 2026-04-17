@@ -2421,71 +2421,60 @@ function renderSignin() {
 
 // ── Coach card: monthly & substitute stats ────────────────────────
 function renderCoaches() {
-  const body=document.getElementById('coaches-body');
-  if(!body){ return; }
+  const body = document.getElementById('coaches-body');
+  if (!body) return;
   // Auto-seed from COACHES constant if empty
-  // Auto-seed coaches if empty
-  if(!coaches.length) {
-    coaches = Object.entries(COACHES).map(([name,d],i)=>({
+  if (!coaches.length) {
+    coaches = Object.entries(COACHES).map(([name,d],i) => ({
       id:'c'+i, name, color:d.color, role:'教練', phone:'', note:'', active:true
     }));
-    saveCol('coaches', coaches).catch(()=>{});  // save in background
+    saveCol('coaches', coaches).catch(()=>{});
   }
-  if(!coaches.length) {
-    body.innerHTML='<div class="empty">尚無教練資料，請點「+ 新增教練」建立</div>';
+  if (!coaches.length) {
+    body.innerHTML = '<div class="empty">尚無教練資料，請點「+ 新增教練」建立</div>';
     return;
   }
-  const now=new Date();
-  const thisMonth=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  try{ body.innerHTML=coaches.map(c=>{
-    const sessCount=sessions.filter(s=>s.coach===c.name).length;
-    // Month: count as effective coach (sub overrides original)
-    let monthPresent=0,monthAsOrig=0,monthAsSub=0;
-    Object.entries(signinRec).forEach(([key,rec])=>{
-      const[sessId,date]=key.split('|');
-      if(!date||!date.startsWith(thisMonth))return;
-      const s=getSess(sessId);if(!s)return;
-      const eff=rec._substituteCoach||s.coach;
-      const cnt=Object.entries(rec).filter(([k,v])=>k!=='_substituteCoach'&&k!=='_substituteFee'&&k!=='_substituteIsExternal'&&v==='present').length;
-      if(eff===c.name){monthPresent+=cnt;}
-      if(s.coach===c.name&&!rec._substituteCoach){monthAsOrig+=cnt;}
-      if(rec._substituteCoach===c.name){monthAsSub+=cnt;}
+  const now = new Date();
+  const thisMonth = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const rows = coaches.map(c => {
+    const coachColor = c.color || '#888';
+    const sessCount = sessions.filter(s => s.coach === c.name).length;
+    // Monthly stats
+    let monthPresent = 0, monthSubCount = 0, totalPresent = 0, totalSubCount = 0;
+    Object.entries(signinRec).forEach(([key, rec]) => {
+      const [sessId, date] = key.split('|');
+      if (!date) return;
+      const s = getSess(sessId); if (!s) return;
+      const eff = rec._substituteCoach || s.coach;
+      const cnt = Object.entries(rec).filter(([k,v]) => !k.startsWith('_') && v === 'present').length;
+      if (eff === c.name) totalPresent += cnt;
+      if (eff === c.name && date.startsWith(thisMonth)) monthPresent += cnt;
+      if (rec._substituteCoach === c.name && date.startsWith(thisMonth)) monthSubCount++;
+      if (rec._substituteCoach === c.name) totalSubCount++;
     });
-    // Month sub count from subLog
-    const monthSubCount=subLog.filter(x=>x.date&&x.date.startsWith(thisMonth)&&x.subCoach===c.name).length;
-    // Total all-time
-    const totalPresent=Object.entries(signinRec).reduce((acc,[key,rec])=>{
-      const sessId=key.split('|')[0];const s=getSess(sessId);if(!s)return acc;
-      const eff=rec._substituteCoach||s.coach;
-      if(eff===c.name)acc+=Object.entries(rec).filter(([k,v])=>k!=='_substituteCoach'&&k!=='_substituteFee'&&k!=='_substituteIsExternal'&&v==='present').length;
-      return acc;
-    },0);
-    // Total sub times
-    const totalSubCount=subLog.filter(x=>x.subCoach===c.name).length;
-    const coachColor=c.color||'#888';
-    return`<div class="coach-card">
-      <div class="coach-avatar" style="background:${coachColor}20;color:${coachColor}">${c.name[0]}</div>
-      <div style="flex:1">
-        <div style="font-size:14px;font-weight:500">${c.name}
-          <span class="pill ${c.active?'pill-green':'pill-gray'}" style="font-size:10px">${c.active?'授課中':'停用'}</span>
-        </div>
-        <div style="font-size:11px;color:#999;margin-top:2px">${c.role||'教練'}${c.phone?' · '+c.phone:''}</div>
-        <div style="background:#f8f8f8;border-radius:8px;padding:6px 10px;margin-top:5px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:4px">
-          <div><div style="font-size:10px;color:#999">本月出席人次</div><div style="font-size:14px;font-weight:600;color:#27500A">${monthPresent}</div></div>
-          <div><div style="font-size:10px;color:#999">本月代課堂數</div><div style="font-size:14px;font-weight:600;color:#BA7517">${monthSubCount}</div></div>
-          <div><div style="font-size:10px;color:#999">累計出席（含代課）</div><div style="font-size:13px;font-weight:500;color:#666">${totalPresent}</div></div>
-          <div><div style="font-size:10px;color:#999">累計代課次數</div><div style="font-size:13px;font-weight:500;color:#BA7517">${totalSubCount}</div></div>
-          <div><div style="font-size:10px;color:#999">負責班次</div><div style="font-size:13px;font-weight:500">${sessCount}</div></div>
-        </div>
-        ${c.note?`<div style="font-size:11px;color:#aaa;margin-top:4px">${c.note}</div>`:''}
-      </div>
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditCoach('${c.id}')">編輯</button>
-        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteCoach('${c.id}')">刪除</button>
-      </div>
-    </div>`;
-  }).join('');
-} catch(e){ body.innerHTML='<div style="color:red;padding:20px">教練載入錯誤：'+e.message+'</div>'; console.error('renderCoaches error:',e); }
+    return '<div class="coach-card">' +
+      '<div class="coach-avatar" style="background:'+coachColor+'20;color:'+coachColor+'">'+c.name[0]+'</div>' +
+      '<div style="flex:1">' +
+        '<div style="font-size:14px;font-weight:500">'+c.name+
+          ' <span class="pill '+(c.active?'pill-green':'pill-gray')+'" style="font-size:10px">'+(c.active?'授課中':'停用')+'</span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:#999;margin-top:2px">'+(c.role||'教練')+(c.phone?' · '+c.phone:'')+'</div>' +
+        '<div style="background:#f8f8f8;border-radius:8px;padding:6px 10px;margin-top:5px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:4px">' +
+          '<div><div style="font-size:10px;color:#999">本月出席人次</div><div style="font-size:14px;font-weight:600;color:#27500A">'+monthPresent+'</div></div>' +
+          '<div><div style="font-size:10px;color:#999">本月代課堂數</div><div style="font-size:14px;font-weight:600;color:#BA7517">'+monthSubCount+'</div></div>' +
+          '<div><div style="font-size:10px;color:#999">累計出席</div><div style="font-size:13px;font-weight:500;color:#666">'+totalPresent+'</div></div>' +
+          '<div><div style="font-size:10px;color:#999">累計代課</div><div style="font-size:13px;font-weight:500;color:#BA7517">'+totalSubCount+'</div></div>' +
+          '<div><div style="font-size:10px;color:#999">負責班次</div><div style="font-size:13px;font-weight:500">'+sessCount+'</div></div>' +
+        '</div>' +
+        (c.note ? '<div style="font-size:11px;color:#aaa;margin-top:4px">'+c.note+'</div>' : '') +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:5px">' +
+        '<button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditCoach(&quot;'+c.id+'&quot;)">編輯</button>' +
+        '<button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteCoach(&quot;'+c.id+'&quot;)">刪除</button>' +
+      '</div>' +
+    '</div>';
+  });
+  body.innerHTML = rows.join('');
 }
 
 // ── Report ①: Attendance with sub comparison & fee calc ──────────
