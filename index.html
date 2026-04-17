@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維運動倉庫 課程管理系統</title>
+<title>哈樂維 v4.0</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse</span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.0</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -1195,7 +1195,6 @@ function buildSiSess() {
               .map(s=>{const v=getVenue(s.venueId);return`<option value="${s.id}">${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name}</option>`;}).join('')
     : '';
   renderSignin();
-  setTimeout(updateSubCoachUI, 100);
 }
 
 function renderSignin() {
@@ -1293,7 +1292,6 @@ function renderSignin() {
   }).join('');
 
   document.getElementById('signin-body').innerHTML = statsBar + (rows || '<div class="empty">此班次尚無報名學生</div>');
-  setTimeout(updateSubCoachUI, 50);
 }
 
 
@@ -1311,7 +1309,17 @@ function manualCheck(stId, checked) {
 function siSetQuick(stId, status) {
   if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
   signinRec[curSiKey][stId] = status;
-  renderSignin();
+  // Update just this row's UI without full re-render
+  const srow = document.querySelector(`.srow[data-stid="${stId}"]`);
+  if (srow) {
+    srow.className = 'srow ' + status;
+    srow.querySelectorAll('.sb').forEach(b => b.classList.remove('sp','sl','sa'));
+    if (status === 'present') srow.querySelector('.sb:nth-child(1)')?.classList.add('sp');
+    if (status === 'leave')   srow.querySelector('.sb:nth-child(2)')?.classList.add('sl');
+    if (status === 'absent')  srow.querySelector('.sb:nth-child(3)')?.classList.add('sa');
+  } else {
+    renderSignin(); // fallback
+  }
 }
 
 async function saveManualSignin() {
@@ -2373,7 +2381,7 @@ function sw(tab, btn) {
   try {
     ({
       dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
-      signin:()=>{renderSignin();setTimeout(updateSubCoachUI,100);}, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
+      signin:()=>{renderSignin();updateSubCoachUI();}, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
       'reg-qr':()=>{ buildRqTermSelect(); renderRegQR(); }, coaches:renderCoaches,
       reports:()=>showReport('att', document.querySelector('.tab-btn')),
       'term-att':()=>{}
