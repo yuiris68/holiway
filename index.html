@@ -2531,7 +2531,9 @@ function renderCoaches() {
   }
   const now = new Date();
   const thisMonth = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  const rows = coaches.map(c => {
+  // Debug: log coaches data
+  console.log('[coaches] count:', coaches.length, 'first:', coaches[0]);
+  const rows = coaches.filter(c => c && c.name).map(c => {
     const coachColor = c.color || '#888';
     const sessCount = sessions.filter(s => s.coach === c.name).length;
     // Monthly stats
@@ -2548,7 +2550,7 @@ function renderCoaches() {
       if (rec._substituteCoach === c.name) totalSubCount++;
     });
     return '<div class="coach-card">' +
-      '<div class="coach-avatar" style="background:'+coachColor+'20;color:'+coachColor+'">'+c.name[0]+'</div>' +
+      '<div class="coach-avatar" style="background:'+coachColor+'20;color:'+coachColor+'">'+(c.name||'?')[0]+'</div>' +
       '<div style="flex:1">' +
         '<div style="font-size:14px;font-weight:500">'+c.name+
           ' <span class="pill '+(c.active?'pill-green':'pill-gray')+'" style="font-size:10px">'+(c.active?'授課中':'停用')+'</span>' +
