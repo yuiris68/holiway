@@ -330,7 +330,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     <!-- PARENT REG QR PANEL -->
     <div id="panel-reg-qr" class="panel">
       <div class="sh"><h2>家長報名 QR Code</h2>
-        <select id="rq-term" style="width:auto;font-size:12px" onchange="renderRegQR()"><option value="">選擇期別</option></select>
+        <select id="rq-term" style="width:auto;font-size:12px" onchange="renderRegQR()" onclick="buildRqTermSelect()"><option value="">選擇期別</option></select>
       </div>
       <div id="reg-qr-body"><div class="empty">請先選擇期別</div></div>
       <div id="reg-pending-section" style="display:none">
@@ -1160,6 +1160,8 @@ function showStudentRegQR() {
 function dlStuQR(){const c=document.getElementById('stu-qr-cv');if(!c)return;const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='學生報名QR.png';a.click();}
 
 function renderRegQR() {
+  // Always rebuild select in case terms changed since load
+  buildRqTermSelect();
   const termId = document.getElementById('rq-term').value;
   const pending  = pendingSubs.filter(p=>p.termId===termId&&p.status==='pending');
   const approved = pendingSubs.filter(p=>p.termId===termId&&p.status==='approved');
@@ -1583,7 +1585,7 @@ function sw(tab, btn) {
   ({
     dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
     signin:renderSignin, makeup:renderMakeup, fee:renderFee, students:renderStudents,
-    'reg-qr':renderRegQR, coaches:renderCoaches, reports:()=>showReport('att',document.querySelector('.tab-btn')),
+    'reg-qr':()=>{buildRqTermSelect();renderRegQR();}, coaches:renderCoaches, reports:()=>showReport('att',document.querySelector('.tab-btn')),
     'term-att': ()=>{}
   }[tab]||function(){})();
 }
