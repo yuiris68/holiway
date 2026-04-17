@@ -657,28 +657,64 @@ async function cancelMakeup(mkId){const m=makeupRec.find(x=>x.id===mkId);if(m){m
 // ── FEE ──────────────────────────────────────────────
 function buildFeTermFilter(){const sel=document.getElementById('fee-term-filter');sel.innerHTML='<option value="all">全部期別</option>'+terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}">${t.name}</option>`).join('');}
 function renderFee(){
-  // Debug: log fees array state
-  console.log('[renderFee] fees.length=', fees.length, 'feeSub=', feeSub);
-  try {
-  const tF=document.getElementById('fee-term-filter').value,sF=document.getElementById('fee-status-filter').value;let list=fees;if(tF!=='all')list=list.filter(f=>f.termId===tF);const ws=list.map(f=>({f,s:feeStatus(f)}));if(sF==='unpaid')list=ws.filter(({s})=>s.bal>0&&!s.refunded).map(({f})=>f);else if(sF==='paid')list=ws.filter(({s})=>s.bal<=0&&!s.refunded).map(({f})=>f);else if(sF==='overdue')list=ws.filter(({s})=>s.label==='逾期').map(({f})=>f);else if(sF==='refunded')list=ws.filter(({s})=>s.refunded).map(({f})=>f);else list=ws.map(({f})=>f);const ti=fees.filter(f=>f.status!=='refunded').reduce((a,f)=>a+f.amount,0),tp=txns.filter(t=>t.type==='pay').reduce((a,t)=>a+t.amount,0),tw=fees.filter(f=>f.status!=='refunded').reduce((a,f)=>a+feeStatus(f).bal,0),tr=txns.filter(t=>t.type==='refund').reduce((a,t)=>a+t.amount,0);document.getElementById('fee-metrics').innerHTML=`<div class="mc"><div class="mc-lbl">總開帳</div><div class="mc-val">${fmt(ti)}</div></div><div class="mc"><div class="mc-lbl">已收款</div><div class="mc-val" style="color:#27500A">${fmt(tp)}</div></div><div class="mc"><div class="mc-lbl">未收款</div><div class="mc-val" style="color:${tw>0?'#A32D2D':'inherit'}">${fmt(tw)}</div></div><div class="mc"><div class="mc-lbl">退費合計</div><div class="mc-val" style="color:${tr>0?'#A32D2D':'inherit'}">${fmt(tr)}</div></div>`;if(feeSub==='ledger'){renderLedger();return;}if(feeSub==='refunds'){renderRefundList();return;}renderBills(list);
-  } catch(e) {
-    console.error('[renderFee] ERROR:', e);
-    const body = document.getElementById('fee-body');
-    if(body) body.innerHTML = '<div style="color:red;padding:10px">renderFee 錯誤：' + e.message + '</div>';
-  }
+  const tF = document.getElementById('fee-term-filter').value;
+  const sF = document.getElementById('fee-status-filter').value;
+  let list = [...fees];
+  if(tF !== 'all') list = list.filter(f => f.termId === tF);
+  const ws = list.map(f => ({f, s: feeStatus(f)}));
+  if(sF === 'unpaid')   list = ws.filter(({s}) => s.bal > 0 && !s.refunded).map(({f}) => f);
+  else if(sF === 'paid')     list = ws.filter(({s}) => s.bal <= 0 && !s.refunded).map(({f}) => f);
+  else if(sF === 'overdue')  list = ws.filter(({s}) => s.label === '逾期').map(({f}) => f);
+  else if(sF === 'refunded') list = ws.filter(({s}) => s.refunded).map(({f}) => f);
+  else list = ws.map(({f}) => f);
+  const ti = fees.filter(f => f.status !== 'refunded').reduce((a, f) => a + f.amount, 0);
+  const tp = txns.filter(t => t.type === 'pay').reduce((a, t) => a + t.amount, 0);
+  const tw = fees.filter(f => f.status !== 'refunded').reduce((a, f) => a + feeStatus(f).bal, 0);
+  const tr = txns.filter(t => t.type === 'refund').reduce((a, t) => a + t.amount, 0);
+  const metricsEl = document.getElementById('fee-metrics');
+  if(metricsEl) metricsEl.innerHTML = `
+    <div class="mc"><div class="mc-lbl">總開帳</div><div class="mc-val">${fmt(ti)}</div></div>
+    <div class="mc"><div class="mc-lbl">已收款</div><div class="mc-val" style="color:#27500A">${fmt(tp)}</div></div>
+    <div class="mc"><div class="mc-lbl">未收款</div><div class="mc-val" style="color:${tw>0?'#A32D2D':'inherit'}">${fmt(tw)}</div></div>
+    <div class="mc"><div class="mc-lbl">退費合計</div><div class="mc-val" style="color:${tr>0?'#A32D2D':'inherit'}">${fmt(tr)}</div></div>`;
+  if(feeSub === 'ledger')  { renderLedger();     return; }
+  if(feeSub === 'refunds') { renderRefundList(); return; }
+  renderBills(list);
 }
+
 function renderBills(list){
-  console.log('[renderBills] list.length=', list ? list.length : 'null');
   const body = document.getElementById('fee-body');
-  if(!body){ console.error('[renderBills] fee-body not found!'); return; }
-  if(!list || !list.length){ body.innerHTML='<div class="empty">沒有符合條件的帳單</div>'; return; }
-  try {
-  body.innerHTML=list.map(f=>{list.map(f=>{const s=feeStatus(f);const st=getSt(f.studentId);const t=f.termId?terms.find(x=>x.id===f.termId):null;const isRef=f.status==='refunded';return`<div class="card" style="border-left:3px solid ${isRef?'#ccc':s.label==='逾期'?'var(--red)':s.bal>0&&s.paid>0?'var(--amber)':s.bal<=0?'var(--green)':'var(--blue)'}"><div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:5px"><div class="av av-pink">${(st.name||'?')[0]}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${st.name}</div><div style="font-size:11px;color:#999">${f.description||'課程費用'}${t?' · '+t.name:''}</div>${f.termStartDate?`<div style="font-size:11px;color:#999">上課期間：${fmtD(f.termStartDate)} — ${fmtD(f.termEndDate)}</div>`:''}</div><span class="pill ${s.cls}">${s.label}</span></div>${!isRef?`<div class="pbar-wrap"><div class="pbar" style="width:${s.pct}%;background:${s.label==='逾期'?'var(--red)':s.pct<100?'var(--amber)':'var(--green)'}"></div></div>`:''}<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:4px"><span style="font-size:11px;color:#999">${isRef?'退費：'+fmt(f.amount):'已繳 '+fmt(s.paid)+' / 應繳 '+fmt(s.net)}</span><span style="font-size:13px;font-weight:500;margin-left:auto;color:${s.bal>0?'#A32D2D':'#888'}">${isRef?'已退費':s.bal>0?'-'+fmt(s.bal):'結清'}</span>${!isRef&&s.bal>0?`<button class="btn btn-green" style="font-size:11px;padding:3px 8px" onclick="openPayMod('${f.id}')">收款</button>`:''}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openFeeHist('${f.id}')">明細</button>${!isRef?`<button class="btn btn-red" style="font-size:11px;padding:3px 8px" onclick="openRefundMod('${f.id}')">退費</button>`:''}<button class="btn btn-red" style="font-size:11px;padding:3px 8px" onclick="deleteFee('${f.id}')">刪除</button></div></div>`;}).join('');
-  } catch(e) {
-    console.error('[renderBills] ERROR:', e);
-    body.innerHTML = '<div style="color:red;padding:10px">renderBills 錯誤：' + e.message + '</div>';
-  }
+  if(!body) return;
+  if(!list || !list.length){ body.innerHTML = '<div class="empty">沒有符合條件的帳單</div>'; return; }
+  body.innerHTML = list.map(f => {
+    const s   = feeStatus(f);
+    const st  = getSt(f.studentId);
+    const t   = f.termId ? terms.find(x => x.id === f.termId) : null;
+    const isRef = f.status === 'refunded';
+    const borderColor = isRef ? '#ccc' : s.label==='逾期' ? 'var(--red)' : s.bal>0&&s.paid>0 ? 'var(--amber)' : s.bal<=0 ? 'var(--green)' : 'var(--blue)';
+    return `<div class="card" style="border-left:3px solid ${borderColor}">
+      <div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:5px">
+        <div class="av av-pink">${(st.name||'?')[0]}</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${st.name}</div>
+          <div style="font-size:11px;color:#999">${f.description||'課程費用'}${t?' · '+t.name:''}</div>
+          ${f.termStartDate?`<div style="font-size:11px;color:#999">上課期間：${fmtD(f.termStartDate)} — ${fmtD(f.termEndDate)}</div>`:''}
+        </div>
+        <span class="pill ${s.cls}">${s.label}</span>
+      </div>
+      ${!isRef?`<div class="pbar-wrap"><div class="pbar" style="width:${s.pct}%;background:${s.label==='逾期'?'var(--red)':s.pct<100?'var(--amber)':'var(--green)'}"></div></div>`:''}
+      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:4px">
+        <span style="font-size:11px;color:#999">${isRef?'退費：'+fmt(f.amount):'已繳 '+fmt(s.paid)+' / 應繳 '+fmt(s.net)}</span>
+        <span style="font-size:13px;font-weight:500;margin-left:auto;color:${s.bal>0?'#A32D2D':'#888'}">${isRef?'已退費':s.bal>0?'-'+fmt(s.bal):'結清'}</span>
+        ${!isRef&&s.bal>0?`<button class="btn btn-green" style="font-size:11px;padding:3px 8px" onclick="openPayMod('${f.id}')">收款</button>`:''}
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openFeeHist('${f.id}')">明細</button>
+        ${!isRef?`<button class="btn btn-red" style="font-size:11px;padding:3px 8px" onclick="openRefundMod('${f.id}')">退費</button>`:''}
+        <button class="btn btn-red" style="font-size:11px;padding:3px 8px" onclick="deleteFee('${f.id}')">刪除</button>
+      </div>
+    </div>`;
+  }).join('');
 }
+
 function renderLedger(){const allTxns=txns.filter(t=>t.type==='pay').sort((a,b)=>b.date.localeCompare(a.date));const total=allTxns.reduce((a,t)=>a+t.amount,0);document.getElementById('fee-body').innerHTML=`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden"><table class="tbl"><colgroup><col style="width:16%"><col style="width:15%"><col style="width:28%"><col style="width:15%"><col style="width:13%"><col style="width:13%"></colgroup><thead><tr><th>日期</th><th>學生</th><th>說明</th><th>金額</th><th>方式</th><th>狀態</th></tr></thead><tbody>${allTxns.map(t=>{const f=fees.find(x=>x.id===t.feeId);const st=getSt(t.studentId);return`<tr><td>${t.date}</td><td>${st.name}</td><td>${f?f.description:'—'}</td><td style="font-weight:500;color:#27500A">${fmt(t.amount)}</td><td>${t.method||'—'}</td><td><span class="pill pill-green">已收</span></td></tr>`;}).join('')}<tr style="background:#f8f8f8"><td colspan="3" style="font-weight:500;text-align:right;padding:7px 9px">合計</td><td style="font-weight:500;color:#27500A;padding:7px 9px">${fmt(total)}</td><td colspan="2"></td></tr></tbody></table></div>`;}
 function renderRefundList(){const refTxns=txns.filter(t=>t.type==='refund').sort((a,b)=>b.date.localeCompare(a.date));const total=refTxns.reduce((a,t)=>a+t.amount,0);document.getElementById('fee-body').innerHTML=refTxns.length?`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden"><table class="tbl"><colgroup><col style="width:16%"><col style="width:15%"><col style="width:28%"><col style="width:14%"><col style="width:27%"></colgroup><thead><tr><th>日期</th><th>學生</th><th>課程</th><th>退費金額</th><th>原因</th></tr></thead><tbody>${refTxns.map(t=>{const f=fees.find(x=>x.id===t.feeId);const st=getSt(t.studentId);return`<tr><td>${t.date}</td><td>${st.name}</td><td>${f?f.description:'—'}</td><td style="font-weight:500;color:#A32D2D">${fmt(t.amount)}</td><td style="color:#999">${t.note||'—'}</td></tr>`;}).join('')}<tr style="background:#f8f8f8"><td colspan="3" style="font-weight:500;text-align:right;padding:7px 9px">退費合計</td><td style="font-weight:500;color:#A32D2D;padding:7px 9px">${fmt(total)}</td><td></td></tr></tbody></table></div>`:'<div class="empty">尚無退費記錄</div>';}
 function openIssueFee(){renderFeeForm(null,null,null);}function openIssueFeeForTerm(termId){renderFeeForm(termId,null,null);}function openIssueFeePreset(stId,termId,sessId){renderFeeForm(termId,stId,sessId);}
