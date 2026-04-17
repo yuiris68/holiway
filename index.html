@@ -318,6 +318,16 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
         <button class="btn btn-pink" style="margin-left:auto" onclick="openIssueFee()">+ 開帳單</button>
       </div>
       <div class="metrics" id="fee-metrics"></div>
+      <!-- Quick date filter -->
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;margin-bottom:4px;border-bottom:0.5px solid #e0e0e0">
+        <span style="font-size:11px;color:#666;flex-shrink:0">快速查詢開帳日：</span>
+        <input type="date" id="fee-quick-from" style="width:auto;font-size:11px;padding:3px 7px">
+        <span style="font-size:11px;color:#999">—</span>
+        <input type="date" id="fee-quick-to" style="width:auto;font-size:11px;padding:3px 7px">
+        <button class="btn btn-blue" style="font-size:11px;padding:3px 10px" onclick="feeQuickFilter()">篩選</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 10px" onclick="clearFeeQuick()">清除</button>
+        <span style="font-size:10px;color:#aaa;margin-left:auto">完整報表→「報表④學費查詢」</span>
+      </div>
       <div class="fee-subtab" id="fee-subtabs">
         <button class="active" onclick="feeSub='bills';renderFee();this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('active'));this.classList.add('active')">帳單列表</button>
         <button onclick="feeSub='ledger';renderFee();this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('active'));this.classList.add('active')">收款紀錄</button>
@@ -833,8 +843,10 @@ async function submitMultiCourseFee(stId) {
   await saveCol('fees', fees);
   await saveCol('txns', txns);
   closeMod();
-  renderStudents();
-  renderDash();
+  buildFeTermFilter();  // refresh term filter dropdown
+  renderFee();          // update fee panel
+  renderStudents();     // update student badges
+  renderDash();         // update dashboard totals
   hint('帳單已開立 ✓');
 }
 
@@ -2141,26 +2153,6 @@ function calcReportFee() {
 
 // ── Fee panel: add date-range filter ──────────────
 // Patch renderFee to include a date range tab
-const _origRenderFee = renderFee;
-function renderFee() {
-  _origRenderFee();
-  // Append quick fee stats by term
-  const body = document.getElementById('fee-body');
-  if (!body) return;
-  // Add date-range summary bar to top of fee panel if in bills tab
-  if (feeSub === 'bills') {
-    const summaryHTML = `<div style="background:#f8f8f8;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <span style="font-size:11px;color:#666">快速日期查詢：</span>
-      <input type="date" id="fee-quick-from" style="width:auto;font-size:11px;padding:3px 7px" placeholder="起">
-      <span style="font-size:11px;color:#999">—</span>
-      <input type="date" id="fee-quick-to" style="width:auto;font-size:11px;padding:3px 7px" placeholder="迄">
-      <button class="btn btn-blue" style="font-size:11px;padding:3px 10px" onclick="feeQuickFilter()">篩選開帳日</button>
-      <button class="btn btn-outline" style="font-size:11px;padding:3px 10px" onclick="clearFeeQuick()">清除</button>
-      <span style="font-size:11px;color:#999;margin-left:auto">💡 完整報表請至「報表 → ④ 學費查詢」</span>
-    </div>`;
-    body.insertAdjacentHTML('beforebegin', summaryHTML);
-  }
-}
 
 function feeQuickFilter() {
   const from = document.getElementById('fee-quick-from')?.value||'';
@@ -2192,7 +2184,7 @@ function feeQuickFilter() {
 function clearFeeQuick() {
   const f=document.getElementById('fee-quick-from');const t=document.getElementById('fee-quick-to');
   if(f)f.value='';if(t)t.value='';
-  _origRenderFee();
+  renderFee();
 }
 
 // ── CSV export ────────────────────────────────────
