@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v5.3</title>
+<title>哈樂維 v5.6</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -220,7 +220,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.3</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.6</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -252,7 +252,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     </div>
     <div id="panel-terms" class="panel">
       <div class="sh"><h2>期別/報名</h2>
-        <select id="term-filter" style="width:auto;font-size:12px" onchange="renderTerms()"><option value="all">全部</option><option value="active">進行中</option><option value="enrolling">報名中</option><option value="upcoming">即將開課</option><option value="ended">已結束</option></select>
+        <select id="term-filter" style="width:auto;font-size:12px" onchange="renderTerms()"><option value="active_all" selected>全部（不含已結束）</option><option value="all">顯示全部</option><option value="active">進行中</option><option value="enrolling">報名中</option><option value="upcoming">即將開課</option><option value="ended">已結束</option></select>
         <button class="btn btn-pink" style="margin-left:auto" onclick="openAddTerm()">+ 新增期別</button>
       </div>
       <div id="terms-body"></div>
@@ -317,7 +317,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     <div id="panel-fee" class="panel">
       <div class="sh"><h2>學費管理</h2>
         <select id="fee-term-filter" style="width:auto;font-size:12px" onchange="renderFee()"><option value="all">全部期別</option></select>
-        <select id="fee-status-filter" style="width:auto;font-size:12px" onchange="renderFee()"><option value="all">全部狀態</option><option value="unpaid">未繳清</option><option value="paid">已繳清</option><option value="overdue">逾期</option><option value="refunded">已退費</option></select>
+        <select id="fee-status-filter" style="width:auto;font-size:12px" onchange="renderFee()"><option value="all">全部狀態</option><option value="no-bill">尚未開帳</option><option value="unpaid">未繳清</option><option value="paid">已繳清</option><option value="overdue">逾期</option><option value="refunded">已退費</option></select>
         <select id="fee-month-filter" style="width:auto;font-size:12px" onchange="applyMonthFilter()">
           <option value="">全部月份</option>
         </select>
@@ -1382,10 +1382,10 @@ function openMultiCourseFee(stId, courseItems) {
           <div style="font-size:11px;color:#999">${c.term ? c.term.name : '—'}${v ? ' · ' + v.shortName : ''} · ${c.sess.periodLessons}堂/期</div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          <input type="number" id="mf-price-${i}" value="${c.isPaid?'':(c.price || '')}" ${c.isPaid?'disabled':''}
-            placeholder="未設費率" min="0" step="100" oninput="mcfRecalc()"
-            style="width:90px;text-align:right;font-size:12px;padding:4px 6px">
-          <div style="font-size:10px;color:#999;margin-top:1px">NT$/期</div>
+          ${c.isPaid
+            ? '<div style="text-align:right;min-width:90px"><div style="font-size:14px;font-weight:700;color:#27500A">已繳清</div><div style="font-size:10px;color:#27500A">'+(c.price!=null?'NT$'+fmt(c.price):'')+'/期</div></div>'
+            : '<div><input type="number" id="mf-price-'+i+'" value="'+(c.price||'')+'" placeholder="未設費率" min="0" step="100" oninput="mcfRecalc()" style="width:90px;text-align:right;font-size:12px;padding:4px 6px"><div style="font-size:10px;color:#999;margin-top:1px">NT$/期</div></div>'
+          }
         </div>
       </div>`;
     }).join('')}
@@ -1535,11 +1535,19 @@ function buildRqTermSelect() {
 function renderTerms() {
   const f = document.getElementById('term-filter').value;
   let list = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
-  if (f !== 'all') list = list.filter(t => termStatus(t).key === f);
+  if (f === 'active_all') {
+    list = list.filter(t => termStatus(t).key !== 'ended');
+  } else if (f !== 'all') {
+    list = list.filter(t => termStatus(t).key === f);
+  }
 
   document.getElementById('terms-body').innerHTML = list.map(t => {
     const st = termStatus(t);
-    const sl = sessions.filter(s => t.sessions && t.sessions.includes(s.id));
+    // Include sessions explicitly added to term, plus any with enrollments for this term
+    const enrolledSessIds = new Set(enrolls.filter(e=>e.termId===t.id).map(e=>e.sessionId));
+    const sl = sessions.filter(s =>
+      (t.sessions && t.sessions.includes(s.id)) || enrolledSessIds.has(s.id)
+    );
     const allE = enrolls.filter(e=>e.termId===t.id&&e.status==='enrolled').length;
     const allW = enrolls.filter(e=>e.termId===t.id&&e.status==='waitlist').length;
     const weeks = t.startDate&&t.endDate ? Math.round((new Date(t.endDate)-new Date(t.startDate))/(7*86400000)) : 0;
@@ -1584,6 +1592,14 @@ function renderTerms() {
           </div>`;
         }).join('')}
       </div>
+      ${(()=>{
+        const allSess = sessions.length;
+        const inTerm  = sl.length;
+        const missing = sessions.filter(s=>!t.sessions||!t.sessions.includes(s.id)).filter(s=>!enrolledSessIds.has(s.id));
+        return missing.length > 0
+          ? '<div style="font-size:11px;color:#999;margin-bottom:6px;padding:5px 8px;background:#f8f8f8;border-radius:6px">ℹ️ 另有 '+missing.length+' 個班次未加入此期別，可點「編輯」將班次加入</div>'
+          : '';
+      })()}
       <div style="display:flex;gap:5px;flex-wrap:wrap">
         <button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="openAddEnroll('${t.id}')">+ 報名</button>
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openTermRoster('${t.id}')">名單</button>
