@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.1</title>
+<title>哈樂維 v4.2</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.1</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.2</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -1369,7 +1369,7 @@ function renderSignin() {
   const co       = COACHES[s.coach] || {};
   const v        = getVenue(s.venueId);
   const enrolled = getEnrolled(termId, sessId);
-  const mkStu    = makeupRec.filter(m=>m.makeupSessionId===sessId&&m.makeupDate===date&&m.status==='scheduled');
+  const mkStu    = makeupRec.filter(m=>m.makeupSessionId===sessId&&m.makeupDate===date&&(m.status==='scheduled'||m.status==='pending'));
   const presentN = Object.values(rec).filter(x=>x==='present').length;
   const leaveN   = Object.values(rec).filter(x=>x==='leave').length;
   const isManual = document.getElementById('manual-mode')?.checked || false;
@@ -1962,20 +1962,23 @@ function openTermAttendance(termId) {
 
 function renderTermAttendance(termId) {
   const t = terms.find(x=>x.id===termId); if (!t) return;
-  const sl = sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)).sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9));
-  const holidays = (t.holidays||[]).map(h=>h.date);
+  const sl = sessions.filter(s=>t.sessions&&t.sessions.includes(s.id))
+    .sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9));
+  const holidays  = (t.holidays||[]).map(h=>h.date);
   const sessDates = t.sessionDates||{};
 
+  const MAKEUP_EXTRA = 2; // extra makeup columns per student
+
   document.getElementById('term-att-body').innerHTML = sl.map(s => {
-    const v = getVenue(s.venueId);
+    const v        = getVenue(s.venueId);
     const enrolled = getEnrolled(termId, s.id);
     if (!enrolled.length) return `<div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">${s.name} · ${s.day} ${s.time}</div><div class="empty">尚無報名學生</div></div>`;
 
-    const sd = sessDates[s.id] || {};
+    const sd     = sessDates[s.id] || {};
     const startD = new Date(sd.start||t.startDate);
     const endD   = new Date(sd.end||t.endDate);
 
-    // Generate all lesson dates for this session's weekday
+    // Generate lesson dates for this weekday
     const dayMap = {週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:0};
     const targetDay = dayMap[s.day];
     const lessonDates = [];
@@ -1987,27 +1990,68 @@ function renderTermAttendance(termId) {
       }
       cur.setDate(cur.getDate()+1);
     }
-    // Limit to periodLessons
     const displayDates = lessonDates.slice(0, s.periodLessons);
 
-    // Build attendance table
-    const headerCells = displayDates.map((d,i)=>`<th title="${d}">${fmtD(d).slice(3)}<br><span style="font-size:9px;color:#999">${'第'+(i+1)+'堂'}</span></th>`).join('');
+    // Header: regular dates + makeup columns
+    const headerCells = displayDates.map((d,i)=>`<th title="${d}">${fmtD(d).slice(3)}<br><span style="font-size:9px;color:#999">第${i+1}堂</span></th>`).join('') +
+      `<th colspan="${MAKEUP_EXTRA}" style="color:#7F77DD;background:#EEEDFE;font-size:10px">補課安排<br><span style="font-weight:400;font-size:9px">點格子選日期與課程</span></th>`;
+
+    // Body rows
     const bodyRows = enrolled.map(e => {
       const st = getSt(e.studentId);
+      // Regular attendance cells
       const cells = displayDates.map(d => {
-        const key = s.id+'|'+d;
-        const rec = signinRec[key]||{};
+        const key    = s.id+'|'+d;
+        const rec    = signinRec[key]||{};
         const status = rec[e.studentId]||'';
-        const icon = status==='present'?'✓':status==='leave'?'△':status==='absent'?'✕':'·';
-        const cls  = status==='present'?'present':status==='leave'?'leave':status==='absent'?'absent':'empty';
+        const icon   = status==='present'?'✓':status==='leave'?'△':status==='absent'?'✕':'·';
+        const cls    = status==='present'?'present':status==='leave'?'leave':status==='absent'?'absent':'empty';
         return `<td><button class="att-dot ${cls}" title="${d} ${status||'未記錄'}" onclick="toggleAtt('${s.id}','${d}','${e.studentId}','${termId}','${s.id}')">${icon}</button></td>`;
       }).join('');
+
+      // Makeup slots: find existing pending/scheduled makeups for this student+session
+      const stuMakeups = makeupRec.filter(m =>
+        m.studentId===e.studentId &&
+        m.originalSessionId===s.id &&
+        m.termId===termId &&
+        m.status!=='done'
+      );
+
+      // Build up to MAKEUP_EXTRA makeup cells
+      const mkCells = Array.from({length: MAKEUP_EXTRA}, (_,mi) => {
+        const mk = stuMakeups[mi];
+        if (mk) {
+          // Already has a makeup record - show it
+          const mkSess = mk.makeupSessionId ? getSess(mk.makeupSessionId) : null;
+          const mkLabel = mk.makeupDate
+            ? `<div style="font-size:9px;font-weight:500;color:#7F77DD">${fmtD(mk.makeupDate).slice(3)}</div>
+               <div style="font-size:8px;color:#555;white-space:nowrap;overflow:hidden;max-width:70px;text-overflow:ellipsis">${mkSess?mkSess.name.slice(0,6):'原班'}</div>`
+            : `<div style="font-size:9px;color:#BA7517">待安排</div>`;
+          // Check if makeup was attended
+          const mkKey = (mk.makeupSessionId||s.id)+'|'+(mk.makeupDate||'');
+          const mkAttended = mk.makeupDate && (signinRec[mkKey]||{})[e.studentId]==='present';
+          return `<td style="background:#F3F0FE;cursor:pointer;min-width:72px"
+            title="點擊編輯補課安排" onclick="openMakeupSlot('${mk.id}','${e.studentId}','${s.id}','${termId}')">
+            ${mkAttended?'<div style="font-size:9px;color:#27500A;font-weight:600">✓補課完成</div>':mkLabel}
+          </td>`;
+        } else {
+          // Empty slot - click to create makeup
+          return `<td style="background:#F8F7FF;cursor:pointer;min-width:72px;text-align:center"
+            title="點擊安排補課" onclick="openMakeupSlot(null,'${e.studentId}','${s.id}','${termId}')">
+            <div style="font-size:16px;color:#C5BEEE">+</div>
+            <div style="font-size:8px;color:#C5BEEE">補課</div>
+          </td>`;
+        }
+      }).join('');
+
       const presentCount = displayDates.filter(d=>(signinRec[s.id+'|'+d]||{})[e.studentId]==='present').length;
       const leaveCount   = displayDates.filter(d=>(signinRec[s.id+'|'+d]||{})[e.studentId]==='leave').length;
+
       return `<tr>
         <td style="text-align:left;white-space:nowrap;font-weight:500">${st.name}</td>
         ${cells}
         <td><span style="font-size:11px;color:#27500A">${presentCount}出</span>/<span style="font-size:11px;color:#378ADD">${leaveCount}假</span></td>
+        ${mkCells}
       </tr>`;
     }).join('');
 
@@ -2020,7 +2064,7 @@ function renderTermAttendance(termId) {
         ${sd.start?`<span class="session-date-chip">📅 ${fmtD(sd.start)}—${fmtD(sd.end)}</span>`:''}
         <span style="font-size:11px;color:#666;margin-left:auto">${displayDates.length}/${s.periodLessons} 堂</span>
       </div>
-      ${holidays.length?`<div style="font-size:10px;color:#BA7517;margin-bottom:6px">🚫 本期休課：${holidays.map(h=>`<span class="holiday-tag">${fmtD(h)}</span>`).join('')}</div>`:''}
+      ${holidays.length?`<div style="font-size:10px;color:#BA7517;margin-bottom:6px">🚫 休課：${holidays.map(h=>`<span class="holiday-tag">${fmtD(h)}</span>`).join('')}</div>`:''}
       <div style="overflow-x:auto">
         <table class="att-table">
           <thead><tr>
@@ -2031,16 +2075,104 @@ function renderTermAttendance(termId) {
           <tbody>${bodyRows}</tbody>
         </table>
       </div>
-      <div style="font-size:10px;color:#999;margin-top:6px;display:flex;gap:12px">
+      <div style="font-size:10px;color:#999;margin-top:6px;display:flex;gap:12px;flex-wrap:wrap">
         <span><span class="att-dot present" style="width:16px;height:16px;font-size:9px">✓</span> 出席</span>
         <span><span class="att-dot leave" style="width:16px;height:16px;font-size:9px">△</span> 請假</span>
         <span><span class="att-dot absent" style="width:16px;height:16px;font-size:9px">✕</span> 缺席</span>
         <span><span class="att-dot empty" style="width:16px;height:16px;font-size:9px">·</span> 未記錄</span>
-        <span style="margin-left:auto">點擊格子可切換出席狀態</span>
+        <span style="color:#7F77DD">■ 補課欄（點+新增）</span>
+        <span style="margin-left:auto">點擊格子切換狀態</span>
       </div>
     </div>`;
   }).join('') || '<div class="empty">此期別無班次或無學生</div>';
 }
+
+
+// ── Makeup slot in attendance table ──────────────────
+function openMakeupSlot(mkId, studentId, origSessId, termId) {
+  const st   = getSt(studentId);
+  const orig = getSess(origSessId);
+  const mk   = mkId ? makeupRec.find(x=>x.id===mkId) : null;
+
+  const sessOpts = sessions.map(s => {
+    const v = getVenue(s.venueId);
+    return `<option value="${s.id}" ${mk&&mk.makeupSessionId===s.id?'selected':origSessId===s.id?'selected':''}>
+      ${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name}</option>`;
+  }).join('');
+
+  document.getElementById('mod-title').textContent = (mk?'編輯':'新增') + '補課 — ' + st.name;
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#F3F0FE;border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12px">
+      <div>學生：<strong>${st.name}</strong></div>
+      <div>原課：${orig?orig.name+' '+orig.day+' '+orig.time:'—'}</div>
+      ${mk&&mk.leaveDate?'<div>請假日：'+mk.leaveDate+'</div>':''}
+    </div>
+    <div class="fr"><label>補課班次</label>
+      <select id="mks-slot">${sessOpts}</select>
+    </div>
+    <div class="fr"><label>補課日期 *</label>
+      <input type="date" id="mkd-slot" value="${mk&&mk.makeupDate?mk.makeupDate:today()}">
+    </div>
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <button class="btn btn-pink" style="flex:1" onclick="saveMakeupSlot('${mkId||''}','${studentId}','${origSessId}','${termId}')">✓ 確認補課安排</button>
+      ${mk?`<button class="btn btn-red" onclick="removeMakeupSlot('${mk.id}','${termId}')">刪除</button>`:''}
+    </div>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+async function saveMakeupSlot(mkId, studentId, origSessId, termId) {
+  const sessId = document.getElementById('mks-slot').value;
+  const date   = document.getElementById('mkd-slot').value;
+  if (!date) { alert('請選擇補課日期'); return; }
+
+  if (mkId) {
+    // Edit existing
+    const mk = makeupRec.find(x=>x.id===mkId);
+    if (mk) { mk.makeupSessionId=sessId; mk.makeupDate=date; mk.status='scheduled'; }
+  } else {
+    // Create new makeup record
+    const existing = makeupRec.find(m=>m.studentId===studentId&&m.originalSessionId===origSessId&&m.termId===termId&&m.status!=='done');
+    if (existing) {
+      existing.makeupSessionId=sessId; existing.makeupDate=date; existing.status='scheduled';
+    } else {
+      makeupRec.push({
+        id:'mk'+Date.now(), studentId, originalSessionId:origSessId, termId,
+        leaveDate:'', makeupSessionId:sessId, makeupDate:date,
+        status:'scheduled', source:'att', createdAt:today()
+      });
+      const st=students.find(s=>s.id===studentId);
+      if(st) st.makeups=(st.makeups||0)+1;
+      await saveCol('students',students).catch(()=>{});
+    }
+  }
+
+  // Also write makeup attendance into signinRec so it shows in sign-in panel
+  const mkKey = sessId+'|'+date;
+  if (!signinRec[mkKey]) signinRec[mkKey] = {};
+  // Mark as scheduled (will show as '補課' badge in renderSignin)
+  signinRec[mkKey]['_makeup_'+studentId] = { studentId, origSessId, scheduled:true };
+
+  await saveCol('makeup', makeupRec);
+  await saveSignin();
+  closeMod();
+  renderTermAttendance(termId);
+  hint('補課已安排 ✓');
+}
+
+async function removeMakeupSlot(mkId, termId) {
+  if (!confirm('確認刪除此補課安排？')) return;
+  const mk = makeupRec.find(x=>x.id===mkId);
+  if (mk) {
+    const st = students.find(s=>s.id===mk.studentId);
+    if(st) st.makeups=Math.max(0,(st.makeups||0)-1);
+    await saveCol('students',students).catch(()=>{});
+  }
+  makeupRec = makeupRec.filter(x=>x.id!==mkId);
+  await saveCol('makeup',makeupRec);
+  closeMod();
+  renderTermAttendance(termId);
+}
+
 
 async function toggleAtt(sessId, date, stId, termId, origSessId) {
   const key = sessId+'|'+date;
