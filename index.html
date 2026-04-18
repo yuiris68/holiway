@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v5.0</title>
+<title>哈樂維 v5.1</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.0</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.1</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -539,7 +539,14 @@ const COACHES={馬力歐:{color:'#7F77DD'},路易吉:{color:'#1D9E75'},RAY:{colo
 const DAY_ORDER={週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:7};
 const DAYS=['週一','週二','週三','週四','週五','週六','週日'];
 const LESSON_OPTIONS=[1,2,3,4,5,6,7,8];
-const VENUE_COLORS=['#378ADD','#639922','#D4537E','#BA7517','#7F77DD','#1D9E75','#D85A30','#888780'];
+const VENUE_COLORS=[
+    '#378ADD','#0C6BAD','#1565C0','#0D47A1',  // 藍
+    '#1D9E75','#27500A','#639922','#2E7D32',  // 綠
+    '#D4537E','#E91E63','#A32D2D','#D85A30',  // 粉/紅
+    '#BA7517','#F57F17','#8B4513','#FF6F00',  // 橘/棕
+    '#7F77DD','#3C3489','#9C27B0','#6A1B9A',  // 紫
+    '#888780','#555555','#37474F','#00796B',  // 深色/青
+  ];
 // tLabel moved to type management section
 
 let venues=[],sessions=[],terms=[],enrolls=[],students=[],signinRec={},makeupRec=[],fees=[],txns=[],pricing=[];
@@ -1333,7 +1340,12 @@ function openIssueFeeForStudent(stId) {
     const s = getSess(e.sessionId);
     const t = terms.find(x => x.id === e.termId);
     const pr = s ? getSessPrice(s.id) : null;
-    return { sessId: e.sessionId, termId: e.termId, sess: s, term: t, price: pr };
+    const termFees = fees.filter(f => f.studentId === stId && f.termId === e.termId && f.status !== 'refunded');
+    const termOwed  = termFees.reduce((a,f) => a + feeStatus(f).bal, 0);
+    const isBilled  = termFees.length > 0;
+    const isPaid    = isBilled && termOwed <= 0;
+    const isUnpaid  = isBilled && termOwed > 0;
+    return { sessId: e.sessionId, termId: e.termId, sess: s, term: t, price: pr, isBilled, isPaid, isUnpaid, termOwed };
   }).filter(x => x.sess);
 
   // If only one enrollment, use simple form
@@ -1361,15 +1373,15 @@ function openMultiCourseFee(stId, courseItems) {
     <div style="font-size:11px;font-weight:500;color:#666;margin-bottom:6px">選擇要開帳的課程</div>
     ${courseItems.map((c, i) => {
       const v = c.sess ? getVenue(c.sess.venueId) : null;
-      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:0.5px solid #e0e0e0;border-radius:8px;margin-bottom:6px;background:#fff">
-        <input type="checkbox" id="mf-chk-${i}" checked
+      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:0.5px solid ${c.isPaid?"#C0DD97":"#e0e0e0"};border-radius:8px;margin-bottom:6px;background:${c.isPaid?"#F5FFF0":"#fff"};opacity:${c.isPaid?0.8:1}">
+        <input type="checkbox" id="mf-chk-${i}" ${c.isPaid?'disabled':'checked'}
           onchange="mcfRecalc()" style="width:16px;height:16px;accent-color:var(--pink);flex-shrink:0">
         <div style="flex:1">
-          <div style="font-size:12px;font-weight:500">${c.sess.name} · ${c.sess.day} ${c.sess.time}</div>
+          <div style="font-size:12px;font-weight:500">${c.sess.name} · ${c.sess.day} ${c.sess.time} ${c.isPaid?'<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#EAF3DE;color:#27500A">已繳清</span>':c.isUnpaid?'<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#412402">欠'+fmt(c.termOwed)+'</span>':'<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#F0E6FF;color:#7F77DD">未開帳</span>'}</div>
           <div style="font-size:11px;color:#999">${c.term ? c.term.name : '—'}${v ? ' · ' + v.shortName : ''} · ${c.sess.periodLessons}堂/期</div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          <input type="number" id="mf-price-${i}" value="${c.price || ''}"
+          <input type="number" id="mf-price-${i}" value="${c.isPaid?'':(c.price || '')}" ${c.isPaid?'disabled':''}
             placeholder="未設費率" min="0" step="100" oninput="mcfRecalc()"
             style="width:90px;text-align:right;font-size:12px;padding:4px 6px">
           <div style="font-size:10px;color:#999;margin-top:1px">NT$/期</div>
@@ -2324,10 +2336,14 @@ function renderTermAttendance(termId) {
     const targetDay = dayMap[s.day];
     const lessonDates = [];
     const cur = new Date(startD);
-    while (cur <= endD) {
+    // Extend window to compensate for holidays (find enough non-holiday dates)
+    const maxEnd = new Date(endD);
+    maxEnd.setDate(maxEnd.getDate() + Math.max(holidays.length, 4) * 7 + 14);
+    while (cur <= maxEnd && lessonDates.length < s.periodLessons) {
       if (cur.getDay() === targetDay) {
         const ds = cur.toISOString().slice(0,10);
         if (!holidays.includes(ds)) lessonDates.push(ds);
+        // holidays are skipped → next week's date is automatically used
       }
       cur.setDate(cur.getDate()+1);
     }
@@ -2564,7 +2580,7 @@ function openEditCoach(id) { const c=coaches.find(x=>x.id===id); if(c) renderCoa
 
 function renderCoachForm(editId,d) {
   const COLORS=['#378ADD','#639922','#D4537E','#BA7517','#7F77DD','#1D9E75','#D85A30','#888780'];
-  const swatches=COLORS.map(c=>`<span style="width:22px;height:22px;border-radius:50%;border:2px solid ${d.color===c?'#333':'transparent'};cursor:pointer;display:inline-block;background:${c};margin-right:4px" onclick="document.getElementById('cf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');
+  const swatches=COLORS.map(c=>`<span style="width:26px;height:26px;border-radius:50%;border:3px solid ${d.color===c?'#333':'transparent'};cursor:pointer;display:inline-block;background:${c};margin:3px" onclick="document.getElementById('cf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');
   document.getElementById('mod-title').textContent = editId?'編輯教練':'新增教練';
   document.getElementById('mod-body').innerHTML = `
     <div class="fg">
