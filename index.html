@@ -307,6 +307,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     </div>
     <div id="panel-makeup" class="panel">
       <div class="sh"><h2>補課管理</h2>
+        <button class="btn btn-pink" style="margin-left:auto" onclick="openAddMakeup()">+ 手動新增補課</button>
         <select id="mk-filter" style="width:auto;font-size:12px" onchange="renderMakeup()"><option value="all">全部</option><option value="pending">待安排</option><option value="scheduled">已排課</option><option value="done">已完成</option></select>
       </div>
       <div id="makeup-body"></div>
@@ -673,6 +674,60 @@ async function cancelMakeup(mkId) {
   await saveCol('makeup', makeupRec);
   renderMakeup();
 }
+
+function openAddMakeup() {
+  const stuOpts = students.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  const sessOpts = sessions.map(s=>{
+    const v=getVenue(s.venueId);
+    return`<option value="${s.id}">${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name}</option>`;
+  }).join('');
+  document.getElementById('mod-title').textContent = '新增補課記錄';
+  document.getElementById('mod-body').innerHTML = `
+    <div class="fr"><label>學生 *</label><select id="am-stu">${stuOpts}</select></div>
+    <div class="fr"><label>原課程</label><select id="am-orig">${sessOpts}</select></div>
+    <div class="fr"><label>請假日期</label><input type="date" id="am-leave" value="${today()}"></div>
+    <div style="border-top:0.5px solid #e0e0e0;margin:10px 0;padding-top:10px">
+      <div style="font-size:12px;font-weight:500;margin-bottom:6px">已知補課安排（選填）</div>
+      <div class="fr"><label>補課班次</label><select id="am-mk-sess"><option value="">— 待安排 —</option>${sessOpts}</select></div>
+      <div class="fr"><label>補課日期</label><input type="date" id="am-mk-date"></div>
+    </div>
+    <button class="btn btn-pink" style="width:100%" onclick="submitAddMakeup()">確認新增</button>`;
+  document.getElementById('overlay').style.display='flex';
+}
+
+async function submitAddMakeup() {
+  const stuId   = document.getElementById('am-stu').value;
+  const origId  = document.getElementById('am-orig').value;
+  const leave   = document.getElementById('am-leave').value;
+  const mkSessId= document.getElementById('am-mk-sess').value;
+  const mkDate  = document.getElementById('am-mk-date').value;
+  if (!stuId||!leave) { alert('請選擇學生和請假日期'); return; }
+  
+  // Find termId from enroll
+  const enroll = enrolls.find(e=>e.studentId===stuId&&e.sessionId===origId&&e.status==='enrolled');
+  const termId = enroll?enroll.termId:(terms[0]?terms[0].id:'');
+  
+  const rec = {
+    id: 'mk'+Date.now(),
+    studentId: stuId,
+    originalSessionId: origId,
+    termId,
+    leaveDate: leave,
+    makeupSessionId: mkSessId||null,
+    makeupDate: mkDate||null,
+    status: mkSessId&&mkDate?'scheduled':'pending',
+    source: 'manual',
+    createdAt: today()
+  };
+  makeupRec.push(rec);
+  const st = students.find(s=>s.id===stuId);
+  if (st) st.makeups = (st.makeups||0)+1;
+  await saveCol('makeup', makeupRec);
+  await saveCol('students', students);
+  closeMod(); renderMakeup(); renderDash();
+  hint('補課記錄已新增 ✓');
+}
+
 
 function renderMakeup() {
   const f = document.getElementById('mk-filter').value;
@@ -1450,6 +1505,30 @@ async function saveSignin() {
 }
 
 // Keep original setSI for QR mode
+
+// QR mode sign-in handler
+async function setSI(key, stId, status, termId, sessId) {
+  if (stId === '_substituteCoach') return;
+  const prev = (signinRec[key]||{})[stId] || '';
+  if (!signinRec[key]) signinRec[key] = {};
+  signinRec[key][stId] = status;
+
+  const st = students.find(s=>s.id===stId);
+  if (st) {
+    if (prev==='present') st.attended = Math.max(0,(st.attended||0)-1);
+    if (prev==='leave')   st.leaves   = Math.max(0,(st.leaves||0)-1);
+    if (status==='present') st.attended = (st.attended||0)+1;
+    if (status==='leave' && prev!=='leave') {
+      st.leaves = (st.leaves||0)+1;
+      const [,date] = key.split('|');
+      const exists = makeupRec.find(m=>m.studentId===stId&&m.leaveDate===date&&m.originalSessionId===sessId);
+      if (!exists) await createMakeup(stId, sessId, termId, date, 'qr');
+    }
+  }
+  await saveSignin();
+  if (st) await saveCol('students', students).catch(()=>{});
+  renderSignin(); renderDash();
+}
 
 
 async function setMkSI(key, stId, mkId, status) {
