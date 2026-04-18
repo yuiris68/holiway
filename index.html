@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.4</title>
+<title>哈樂維 v4.5</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.4</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.5</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -636,7 +636,7 @@ function renderDash(){
 
         return `<td style="padding:4px;vertical-align:top">
           <div style="background:${tcolor};color:#fff;border-radius:6px;padding:5px 7px;font-size:11px;cursor:pointer;min-height:58px"
-            onclick="sw('sessions',document.querySelectorAll('.nb')[2])" title="${s.name} · ${s.coach}">
+            onclick="showSessionDetail('${s.id}','${activeTerm?activeTerm.id:''}')" style="cursor:pointer" title="點擊查看課程詳情">
             <div style="font-weight:600;font-size:12px;margin-bottom:2px">${tname}</div>
             <div style="font-size:10px;opacity:.9;margin-bottom:3px">${s.name.replace(tname,'').trim()||s.name}</div>
             <div style="display:flex;align-items:center;gap:3px">
@@ -734,7 +734,7 @@ function renderSessions(){
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
-function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
+function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
 function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0)sessions[i]={...sessions[i],...d};if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
@@ -2115,7 +2115,8 @@ function renderTermAttendance(termId) {
 
     // Header: regular dates + makeup columns
     const headerCells = displayDates.map((d,i)=>`<th title="${d}">${fmtD(d).slice(3)}<br><span style="font-size:9px;color:#999">第${i+1}堂</span></th>`).join('') +
-      `<th colspan="${MAKEUP_EXTRA}" style="color:#7F77DD;background:#EEEDFE;font-size:10px">補課安排<br><span style="font-weight:400;font-size:9px">點格子選日期與課程</span></th>`;
+      `<th style="color:#555;font-size:10px;min-width:70px">統計</th>` +
+      `<th colspan="${MAKEUP_EXTRA}" style="color:#7F77DD;background:#EEEDFE;font-size:10px">補課安排<br><span style="font-weight:400;font-size:9px">點＋新增</span></th>`;
 
     // Body rows
     const bodyRows = enrolled.map(e => {
@@ -2168,10 +2169,15 @@ function renderTermAttendance(termId) {
       const presentCount = displayDates.filter(d=>(signinRec[s.id+'|'+d]||{})[e.studentId]==='present').length;
       const leaveCount   = displayDates.filter(d=>(signinRec[s.id+'|'+d]||{})[e.studentId]==='leave').length;
 
+      const absentCount = displayDates.filter(d=>(signinRec[s.id+'|'+d]||{})[e.studentId]==='absent').length;
       return `<tr>
         <td style="text-align:left;white-space:nowrap;font-weight:500">${st.name}</td>
         ${cells}
-        <td><span style="font-size:11px;color:#27500A">${presentCount}出</span>/<span style="font-size:11px;color:#378ADD">${leaveCount}假</span></td>
+        <td style="min-width:80px;white-space:nowrap">
+          <div style="font-size:11px"><span style="color:#27500A;font-weight:500">出 ${presentCount}</span></div>
+          <div style="font-size:11px"><span style="color:#378ADD">假 ${leaveCount}</span></div>
+          ${absentCount>0?'<div style="font-size:11px"><span style="color:#BA7517">缺 '+absentCount+'</span></div>':''}
+        </td>
         ${mkCells}
       </tr>`;
     }).join('');
@@ -3548,6 +3554,86 @@ async function deleteCustomType(typeId) {
   await db.collection('sessionTypes').doc(typeId).delete();
   renderTypeManager();
   hint('已刪除 ✓');
+}
+
+
+// ── Session detail modal from timetable ──────────────────────────
+function showSessionDetail(sessId, termId) {
+  const s  = getSess(sessId); if (!s) return;
+  const v  = getVenue(s.venueId);
+  const t  = terms.find(x=>x.id===termId);
+  const pr = getSessPrice(s.id);
+  const co = coaches.find(c=>c.name===s.coach)||{color:'#888'};
+  const enrolled = t ? getEnrolled(t.id, s.id) : [];
+  const waitlist = t ? getWait(t.id, s.id) : [];
+  const cnt = enrolled.length;
+  const pct = s.capacity>0 ? Math.round(cnt/s.capacity*100) : 0;
+
+  // Makeup students for this session today
+  const todayMakeup = makeupRec.filter(m=>
+    m.makeupSessionId===sessId &&
+    m.makeupDate===today() &&
+    m.status==='scheduled'
+  );
+
+  // Today's attendance
+  const todayKey = sessId+'|'+today();
+  const todayRec = signinRec[todayKey]||{};
+  const todayPresent = Object.entries(todayRec).filter(([k,v])=>!k.startsWith('_')&&v==='present').length;
+  const todayLeave   = Object.entries(todayRec).filter(([k,v])=>!k.startsWith('_')&&v==='leave').length;
+
+  document.getElementById('mod-title').textContent = s.name + ' — 課程資訊';
+  document.getElementById('mod-body').innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="width:48px;height:48px;border-radius:50%;background:${co.color||'#888'}20;color:${co.color||'#888'};display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;flex-shrink:0">${(s.coach||'?')[0]}</div>
+      <div>
+        <div style="font-size:16px;font-weight:600">${s.name}</div>
+        <div style="font-size:12px;color:#666">${s.coach||'未指定'} 教練${v?' · '+v.name:''}</div>
+      </div>
+      <span class="badge ${s.type}" style="margin-left:auto">${tLabel(s.type)}</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div style="background:#f8f8f8;border-radius:8px;padding:9px 11px">
+        <div style="font-size:10px;color:#999;margin-bottom:2px">上課時間</div>
+        <div style="font-size:13px;font-weight:500">${s.day} ${s.time}</div>
+      </div>
+      <div style="background:#f8f8f8;border-radius:8px;padding:9px 11px">
+        <div style="font-size:10px;color:#999;margin-bottom:2px">每期堂數</div>
+        <div style="font-size:13px;font-weight:500">${s.periodLessons} 堂</div>
+      </div>
+      <div style="background:#f8f8f8;border-radius:8px;padding:9px 11px">
+        <div style="font-size:10px;color:#999;margin-bottom:2px">報名人數</div>
+        <div style="font-size:13px;font-weight:500;color:${cnt>=s.capacity?'#A32D2D':'#27500A'}">${cnt} / ${s.capacity} 人</div>
+        <div style="background:#e0e0e0;border-radius:3px;height:4px;margin-top:4px"><div style="background:${pct>=100?'#A32D2D':pct>=80?'#BA7517':'#1D9E75'};width:${pct}%;height:100%;border-radius:3px"></div></div>
+      </div>
+      ${pr!=null?`<div style="background:#f8f8f8;border-radius:8px;padding:9px 11px">
+        <div style="font-size:10px;color:#999;margin-bottom:2px">課程學費</div>
+        <div style="font-size:13px;font-weight:500;color:#27500A">NT$${pr.toLocaleString()}</div>
+      </div>`:''}
+    </div>
+
+    ${t?`<div style="background:#EAF3DE;border-radius:8px;padding:9px 11px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:500;color:#27500A;margin-bottom:4px">📅 ${t.name} 報名名單（${cnt}人）</div>
+      ${enrolled.length?enrolled.map(e=>{const st=getSt(e.studentId);return`<span style="font-size:11px;background:#fff;border-radius:5px;padding:2px 7px;margin:2px;display:inline-block">${st.name}</span>`;}).join(''):'<span style="font-size:11px;color:#999">尚無報名學生</span>'}
+      ${waitlist.length?`<div style="font-size:11px;color:#BA7517;margin-top:4px">候補：${waitlist.map(e=>getSt(e.studentId).name).join('、')}</div>`:''}
+    </div>`:''  }
+
+    <div style="background:#F3F0FE;border-radius:8px;padding:9px 11px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:500;color:#7F77DD;margin-bottom:4px">📊 今日（${today()}）出席</div>
+      <div style="display:flex;gap:12px">
+        <span style="font-size:13px;color:#27500A;font-weight:500">出席 ${todayPresent}</span>
+        <span style="font-size:13px;color:#378ADD">請假 ${todayLeave}</span>
+        ${todayMakeup.length?`<span style="font-size:13px;color:#7F77DD">補課 ${todayMakeup.length}</span>`:''}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-pink" style="flex:1" onclick="closeMod();sw('signin',document.querySelectorAll('.nb')[4])">前往簽到</button>
+      <button class="btn btn-outline" style="flex:1" onclick="closeMod();openEditSession('${s.id}')">編輯課程</button>
+      ${t?`<button class="btn btn-outline" style="flex:1" onclick="closeMod();openTermAttendance('${t.id}')">點名總覽</button>`:''}
+    </div>`;
+  document.getElementById('overlay').style.display = 'flex';
 }
 
 </script>
