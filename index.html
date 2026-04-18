@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v6.3</title>
+<title>哈樂維 v6.4</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -220,7 +220,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.3</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.4</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -1126,13 +1126,14 @@ function renderBills(list, noBillRows=[]){
     const s   = feeStatus(f);
     const st  = getSt(f.studentId);
     const t   = f.termId ? terms.find(x => x.id === f.termId) : null;
+    const isVoucher = f.type === 'voucher';
     const isRef = f.status === 'refunded';
     const borderColor = isRef ? '#ccc' : s.label==='逾期' ? 'var(--red)' : s.bal>0&&s.paid>0 ? 'var(--amber)' : s.bal<=0 ? 'var(--green)' : 'var(--blue)';
     return `<div class="card" style="border-left:3px solid ${borderColor}">
       <div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:5px">
         <div class="av av-pink">${(st.name||'?')[0]}</div>
         <div style="flex:1">
-          <div style="font-size:13px;font-weight:500">${st.name}</div>
+          <div style="font-size:13px;font-weight:500">${st.name}${isVoucher?'<span style="font-size:10px;padding:1px 6px;border-radius:5px;background:#F3F0FE;color:#7F77DD;margin-left:6px">🎟多元券</span>':''}</div>
           <div style="font-size:11px;color:#999">${f.description||'課程費用'}${t?' · '+t.name:''}</div>
           ${f.termStartDate?`<div style="font-size:11px;color:#999">上課期間：${fmtD(f.termStartDate)} — ${fmtD(f.termEndDate)}</div>`:''}
         </div>
@@ -3463,7 +3464,12 @@ async function createVoucherPack(fixedStId) {
   }
   closeMod();
   renderVouchers();
-  hint(`✓ 已新增 ${qty} 張使用券`);
+  if (price > 0) {
+    renderFee();      // refresh fee panel
+    renderStudents(); // refresh student badges
+    renderDash();     // refresh dashboard totals
+  }
+  hint(`✓ 已新增 ${qty} 張使用券${price>0?' · 帳單已建立':'（未設金額，如需收費請至學費頁開帳）'}`);
 }
 
 // ── 使用紀錄 ─────────────────────────────────────────────────────
@@ -3683,25 +3689,26 @@ function openAddBookingToSlot(slotId) {
     if (booked.includes(st.id)) return false;
     return getStudentValidRemaining(st.id) > 0;
   });
-  const noVoucher = students.filter(st => !booked.includes(st.id) && getStudentValidRemaining(st.id) === 0);
 
   document.getElementById('mod-title').textContent = `加入學員 — ${fmtD(slot.date)} ${slot.time}`;
-  document.getElementById('mod-body').innerHTML = `
+  document.getElementById('mod-body').innerHTML = eligible.length ? `
     <div style="background:#F3F0FE;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px;color:#4527A0">
-      已預約 ${booked.length} / ${slot.capacity} 人
+      已預約 ${booked.length} / ${slot.capacity} 人 · 以下學員均有有效使用券
     </div>
     <div class="fr"><label>選擇學員</label>
       <select id="ab-stu">
-        <optgroup label="有效使用券 (${eligible.length}人)">
-          ${eligible.map(s=>`<option value="${s.id}">${s.name}（剩 ${getStudentValidRemaining(s.id)} 張）</option>`).join('') || '<option disabled>無</option>'}
-        </optgroup>
-        <optgroup label="無使用券 (${noVoucher.length}人)">
-          ${noVoucher.map(s=>`<option value="${s.id}" style="color:#aaa">${s.name}（需先購券）</option>`).join('')}
-        </optgroup>
+        ${eligible.map(s=>`<option value="${s.id}">${s.name}（剩 ${getStudentValidRemaining(s.id)} 張）</option>`).join('')}
       </select>
     </div>
     <div class="fr"><label>備註</label><input type="text" id="ab-note" placeholder="選填"></div>
-    <button class="btn btn-pink" style="width:100%" onclick="createBooking('${slotId}')">確認加入（預約時不扣券，出席後才扣）</button>`;
+    <button class="btn btn-pink" style="width:100%" onclick="createBooking('${slotId}')">確認加入（出席後才扣券）</button>
+  ` : `
+    <div style="text-align:center;padding:20px 0">
+      <div style="font-size:32px;margin-bottom:8px">🎟</div>
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">目前無可加入的學員</div>
+      <div style="font-size:12px;color:#999">所有學員都已預約此時段，或尚無有效使用券。<br>請先至「券管理」為學員購買使用券。</div>
+      <button class="btn btn-pink" style="margin-top:12px" onclick="closeMod();switchMultiTab('vouchers',document.getElementById('multi-tab-vouchers'))">前往購買使用券</button>
+    </div>`;
   document.getElementById('overlay').style.display = 'flex';
 }
 
@@ -4138,6 +4145,26 @@ function calcReportAtt() {
     rows.push({coach:eff,origCoach:s.coach,isSub,subFee,isExt,sessId,sessName:s.name+' '+s.day+' '+s.time,date,present,leave});
   });
 
+  // Add multi-voucher attendance (出席扣抵的多元課程)
+  multiSchedule.forEach(slot => {
+    if (!slot.date || !slot.coach) return;
+    if (from && slot.date < from) return;
+    if (to   && slot.date > to  ) return;
+    if (coachF && slot.coach !== coachF) return;
+    if (sessF) return; // multi slots don't have a sessId to filter
+    const slotAttended = voucherBookings.filter(b =>
+      b.slotId === slot.id && b.status === 'attended'
+    ).length;
+    if (!slotAttended) return;
+    rows.push({
+      coach: slot.coach, origCoach: slot.coach,
+      isSub: false, subFee: 0, isExt: false,
+      sessId: 'multi_' + slot.id,
+      sessName: `多元課 ${slot.time}`,
+      date: slot.date, present: slotAttended, leave: 0, isMulti: true
+    });
+  });
+
   // Group by coach
   const byCoach={};
   rows.forEach(r=>{
@@ -4146,6 +4173,7 @@ function calcReportAtt() {
     if(!g.sessions[r.sessId])g.sessions[r.sessId]={name:r.sessName,present:0,leave:0,classDates:[],subDates:[],subFeeTotal:0};
     const ss=g.sessions[r.sessId];
     ss.present+=r.present;ss.leave+=r.leave;ss.classDates.push(r.date);
+    if(r.isMulti) ss.isMulti=true;
     g.totalPresent+=r.present;g.totalLeave+=r.leave;
     if(r.isSub){ss.subDates.push(r.date);ss.subFeeTotal+=r.subFee*r.present;g.totalSubFee+=r.subFee*r.present;g.subSessions.push({date:r.date,sessName:r.sessName,present:r.present,subFee:r.subFee,isExt:r.isExt,origCoach:r.origCoach});}
   });
@@ -4193,6 +4221,7 @@ function calcReportAtt() {
     const sessRows=sl.map((ss,i)=>{
       const subNote=ss.subDates.length?`<span style="font-size:10px;color:#BA7517;background:#FAEEDA;padding:1px 5px;border-radius:5px;margin-left:3px">代課${ss.subDates.length}堂</span>`:'';
       const mkNote=ss.makeupCount?`<span style="font-size:10px;color:#7F77DD;background:#F3F0FE;padding:1px 5px;border-radius:5px;margin-left:3px">含補課${ss.makeupCount}</span>`:'';
+      const multiNote=ss.isMulti?'<span style="font-size:10px;color:#7F77DD;background:#F3F0FE;padding:1px 5px;border-radius:5px;margin-left:3px">🎟多元券</span>':'';
       return`<tr>
         ${i===0?`<td rowspan="${sl.length+1}" style="font-weight:600;vertical-align:top;white-space:nowrap;padding:8px 10px;background:#fafafa;border-right:2px solid ${co.color||'#888'}">
           ${coachDot}${g.coach}
