@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.7</title>
+<title>哈樂維 v4.8</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.7</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.8</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -1075,9 +1075,36 @@ function renderUnpaidList(){
 
 
 function openIssueFee(){renderFeeForm(null,null,null);}function openIssueFeeForTerm(termId){renderFeeForm(termId,null,null);}function openIssueFeePreset(stId,termId,sessId){renderFeeForm(termId,stId,sessId);}
-function renderFeeForm(pT,pS,pSess){const to=terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${t.id===pT?'selected':''}>${t.name}</option>`).join('');const stu=students.map(s=>`<option value="${s.id}" ${s.id===pS?'selected':''}>${s.name}</option>`).join('');const preTerm=terms.find(t=>t.id===pT);const termSessions=preTerm?sessions.filter(s=>preTerm.sessions&&preTerm.sessions.includes(s.id)):sessions;const so='<option value="">— 未指定 —</option>'+termSessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const pr=getSessPrice(s.id);return`<option value="${s.id}" data-price="${pr||''}" data-name="${s.name+' '+s.day+s.time}" ${s.id===pSess?'selected':''}>${s.name} · ${s.day} ${s.time}${pr!=null?' — '+fmt(pr):'（未設費率）'}</option>`;}).join('');const preSess=pSess?getSess(pSess):null;const autoPrice=pSess?getSessPrice(pSess):null;const due=addWeeks(today(),14);document.getElementById('mod-title').textContent='開立帳單';document.getElementById('mod-body').innerHTML=`<div class="fg"><div class="fr"><label>學生 *</label><select id="if-stu">${stu||'<option>請先新增學生</option>'}</select></div><div class="fr"><label>期別</label><select id="if-term" onchange="ifTermChange()">${to}</select></div></div><div class="fr"><label>課程（自動帶入學費）</label><select id="if-sess" onchange="ifSessChange()">${so}</select></div>${preTerm?`<div style="background:#E6F1FB;border-radius:8px;padding:7px 9px;font-size:11px;color:#0C447C;margin-bottom:8px">上課期間：${fmtD(preTerm.startDate)} — ${fmtD(preTerm.endDate)}</div>`:'<div id="if-period-info"></div>'}<div class="fg"><div class="fr"><label>金額 (NT$) *</label><input type="number" id="if-amt" value="${autoPrice||''}" min="0" step="100" oninput="ifPrev()"></div><div class="fr"><label>折扣 (NT$)</label><input type="number" id="if-disc" value="0" min="0" oninput="ifPrev()"></div></div><div class="fg"><div class="fr"><label>到期日</label><input type="date" id="if-due" value="${due}"></div><div class="fr"><label>說明</label><input type="text" id="if-note" value="${preSess?preSess.name+' '+preSess.day+preSess.time:''}" placeholder="課程費用"></div></div><div id="if-prev" style="margin-bottom:8px"></div><button class="btn btn-pink" style="width:100%" onclick="issueFee()">確認開立</button>`;ifPrev();document.getElementById('overlay').style.display='flex';}
+function renderFeeForm(pT,pS,pSess){const to=terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${t.id===pT?'selected':''}>${t.name}</option>`).join('');const stu=students.map(s=>`<option value="${s.id}" ${s.id===pS?'selected':''}>${s.name}</option>`).join('');const preTerm=terms.find(t=>t.id===pT);const termSessions=preTerm?sessions.filter(s=>preTerm.sessions&&preTerm.sessions.includes(s.id)):sessions;const so='<option value="">— 未指定 —</option>'+termSessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const pr=getSessPrice(s.id);return`<option value="${s.id}" data-price="${pr!=null?pr:''}" data-name="${s.name+' '+s.day+' '+s.time}" ${s.id===pSess?'selected':''}>${s.name} · ${s.day} ${s.time}${pr!=null?' — '+fmt(pr):'（未設費率）'}</option>`;}).join('');const preSess=pSess?getSess(pSess):null;
+  // Try to get price from pricing collection, then from session default
+  const autoPrice = pSess ? getSessPrice(pSess) : null;
+  const autoName  = preSess ? (preSess.name+' '+preSess.day+' '+preSess.time) : '';const due=addWeeks(today(),14);document.getElementById('mod-title').textContent='開立帳單';document.getElementById('mod-body').innerHTML=`<div class="fg"><div class="fr"><label>學生 *</label><select id="if-stu">${stu||'<option>請先新增學生</option>'}</select></div><div class="fr"><label>期別</label><select id="if-term" onchange="ifTermChange()">${to}</select></div></div><div class="fr"><label>課程（選擇後自動帶入學費）</label><select id="if-sess" onchange="ifSessChange()">${so}</select></div>${preTerm?`<div style="background:#E6F1FB;border-radius:8px;padding:7px 9px;font-size:11px;color:#0C447C;margin-bottom:8px">上課期間：${fmtD(preTerm.startDate)} — ${fmtD(preTerm.endDate)}</div>`:'<div id="if-period-info"></div>'}<div class="fg"><div class="fr"><label>金額 (NT$) *</label><input type="number" id="if-amt" value="${autoPrice!=null?autoPrice:''}" min="0" step="100" oninput="ifPrev()"></div><div class="fr"><label>折扣 (NT$)</label><input type="number" id="if-disc" value="0" min="0" oninput="ifPrev()"></div></div><div class="fg"><div class="fr"><label>到期日</label><input type="date" id="if-due" value="${due}"></div><div class="fr"><label>說明</label><input type="text" id="if-note" value="${preSess?preSess.name+' '+preSess.day+preSess.time:''}" placeholder="課程費用"></div></div><div id="if-prev" style="margin-bottom:8px"></div><button class="btn btn-pink" style="width:100%" onclick="issueFee()">確認開立</button>`;ifPrev();setTimeout(()=>ifSessChange(),50);document.getElementById('overlay').style.display='flex';}
 function ifTermChange(){const termId=document.getElementById('if-term').value;const t=terms.find(x=>x.id===termId);const ts=t?sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)):sessions;const so='<option value="">— 未指定 —</option>'+ts.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const pr=getSessPrice(s.id);return`<option value="${s.id}" data-price="${pr||''}" data-name="${s.name+' '+s.day+s.time}">${s.name} · ${s.day} ${s.time}${pr!=null?' — '+fmt(pr):'（未設費率）'}</option>`;}).join('');document.getElementById('if-sess').innerHTML=so;ifSessChange();}
-function ifSessChange(){const sel=document.getElementById('if-sess');const opt=sel.options[sel.selectedIndex];const price=opt&&opt.dataset.price?parseFloat(opt.dataset.price):null;const name=opt&&opt.dataset.name?opt.dataset.name:'';if(price!=null)document.getElementById('if-amt').value=price;const noteEl=document.getElementById('if-note');if(noteEl&&name)noteEl.value=name;ifPrev();}
+function ifSessChange(){
+  const sel    = document.getElementById('if-sess');
+  const sessId = sel ? sel.value : '';
+  const opt    = sel ? sel.options[sel.selectedIndex] : null;
+
+  // Get price: try data-price first, then direct Firebase pricing lookup
+  let price = null;
+  if (opt && opt.dataset.price) price = parseFloat(opt.dataset.price);
+  if ((price == null || isNaN(price)) && sessId) price = getSessPrice(sessId);
+
+  // Get name for note field
+  const s = sessId ? getSess(sessId) : null;
+  const name = (opt && opt.dataset.name) ? opt.dataset.name
+             : s ? (s.name + ' ' + s.day + ' ' + s.time) : '';
+
+  // Fill amount field
+  const amtEl = document.getElementById('if-amt');
+  if (amtEl && price != null && !isNaN(price)) amtEl.value = price;
+
+  // Fill note field
+  const noteEl = document.getElementById('if-note');
+  if (noteEl && name && !noteEl.value) noteEl.value = name;
+
+  ifPrev();
+}
 function ifPrev(){const a=parseFloat(document.getElementById('if-amt').value)||0,d=parseFloat(document.getElementById('if-disc').value)||0;document.getElementById('if-prev').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">費用</span><span>${fmt(a)}</span></div>${d>0?`<div class="rrow"><span style="color:#999">折扣</span><span style="color:#A32D2D">-${fmt(d)}</span></div>`:''}<div class="rrow rtotal"><span>應繳</span><span>${fmt(a-d)}</span></div></div>`;}
 async function issueFee(){const stId=document.getElementById('if-stu').value,amt=parseFloat(document.getElementById('if-amt').value)||0,disc=parseFloat(document.getElementById('if-disc').value)||0;if(!stId||amt<=0){alert('請選擇學生並輸入金額');return;}const sessId=document.getElementById('if-sess').value||null;const termId=document.getElementById('if-term').value||null;const term=terms.find(t=>t.id===termId);const fee={id:'f'+Date.now(),studentId:stId,termId,sessionId:sessId,amount:amt,description:document.getElementById('if-note').value||'課程費用',dueDate:document.getElementById('if-due').value,issuedDate:today(),termStartDate:term?.startDate||null,termEndDate:term?.endDate||null};fees.push(fee);if(disc>0)txns.push({id:'t'+Date.now(),feeId:fee.id,studentId:stId,type:'disc',amount:disc,date:today(),method:'—',note:'開帳折扣'});await saveCol('fees',fees);await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
 function openPayMod(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);document.getElementById('mod-title').textContent='收款 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">應繳</span><span>${fmt(s.net)}</span></div><div class="rrow"><span style="color:#999">已繳</span><span style="color:#27500A">${fmt(s.paid)}</span></div><div class="rrow rtotal"><span>尚欠</span><span style="color:#A32D2D">${fmt(s.bal)}</span></div></div><div class="fg"><div class="fr"><label>收款金額</label><input type="number" id="pay-amt" value="${s.bal}" min="1"></div><div class="fr"><label>付款方式</label><select id="pay-meth"><option>現金</option><option>轉帳</option><option>LINE Pay</option><option>信用卡</option></select></div></div><div class="fg"><div class="fr"><label>日期</label><input type="date" id="pay-date" value="${today()}"></div><div class="fr"><label>備註</label><input type="text" id="pay-note"></div></div><button class="btn btn-green" style="width:100%" onclick="recordPay('${feeId}')">確認收款</button>`;document.getElementById('overlay').style.display='flex';}
