@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.8</title>
+<title>哈樂維 v4.9</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.8</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.9</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -551,6 +551,20 @@ async function saveCol(col,arr){ try { await fsSave(col,arr); } catch(e){ consol
 function today(){return new Date().toISOString().slice(0,10);}
 function fmtD(d){return d?d.slice(2).replace(/-/g,'/'):'—';}
 function addWeeks(d,n){const dt=new Date(d);dt.setDate(dt.getDate()+n*7);return dt.toISOString().slice(0,10);}
+function getStudentAge(st) {
+  if (st && st.birthDate) {
+    const parts = st.birthDate.split('-').map(Number);
+    const by=parts[0], bm=parts[1]||1;
+    const now = new Date();
+    let ageY = now.getFullYear()-by;
+    let ageM = (now.getMonth()+1)-bm;
+    if(ageM<0){ageY--;ageM+=12;}
+    return {ageY:Math.max(0,ageY), ageM:Math.max(0,ageM)};
+  }
+  return {ageY:(st&&st.ageY)||0, ageM:(st&&st.ageM)||0};
+}
+
+
 function fmtAge(y,m){if(!y&&!m)return'—';let s='';if(y)s+=y+'Y ';if(m)s+=m+'M';return s.trim();}
 function fmt(n){return'NT$'+Math.round(n).toLocaleString();}
 function termStatus(t){const td=today();if(td>=t.startDate&&td<=t.endDate)return{label:'進行中',key:'active'};if(td<t.startDate){if(t.enrollStartDate&&td>=t.enrollStartDate&&td<=t.enrollEndDate)return{label:'報名中',key:'enrolling'};if(t.preRegStartDate&&td>=t.preRegStartDate)return{label:'預報名',key:'upcoming'};return{label:'未開放',key:'upcoming'};}return{label:'已結束',key:'ended'};}
@@ -1115,14 +1129,142 @@ function openFeeHist(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;cons
 async function deleteFee(feeId){if(!confirm('確認刪除此帳單？'))return;fees=fees.filter(f=>f.id!==feeId);txns=txns.filter(t=>t.feeId!==feeId);await saveCol('fees',fees);await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
 
 // ── STUDENTS ─────────────────────────────────────────
-function renderStudents(){const q=(document.getElementById('stu-search').value||'').toLowerCase();let list=students.filter(st=>!q||st.name.toLowerCase().includes(q)||(st.parent||'').toLowerCase().includes(q));if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${owed>0?`<span class="pill pill-red">欠 ${fmt(owed)}</span>`:hasBills?'<span class="pill pill-green">學費結清</span>':'<span class="pill pill-gray">尚未開帳</span>'}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(st.ageY,st.ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div><div><div style="font-size:10px;color:#999">出席 / 假剩</div><div style="font-size:12px;font-weight:500">${st.attended||0} / ${(st.leaveMax||2)-(st.leaves||0)}</div></div></div><div style="margin-bottom:6px">${stE.map(e=>{const s=getSess(e.sessionId);const t=terms.find(x=>x.id===e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;return s?`<span style="font-size:11px;padding:2px 7px;border-radius:7px;background:#f8f8f8;display:inline-block;margin:2px 2px 0 0">${v?'['+v.shortName+'] ':''}${t?t.name+' ':''}${s.name} ${s.day} ${s.time}${pr!=null?' <span style="color:#27500A">'+fmt(pr)+'</span>':''}</span>`:''}).join('')||'<span style="font-size:11px;color:#999">未報名</span>'}</div><div style="display:flex;gap:5px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="openIssueFeeForStudent('${st.id}')">開帳單</button></div></div>`;}).join('');}
-function stuFormHTML(d){return`<div class="section-div">孩子資料</div><div class="fg"><div class="fr"><label>孩子姓名 *</label><input type="text" id="ns-n" value="${d.name||''}" placeholder="姓名"></div><div class="fr"><label>孩子性別</label><select id="ns-g"><option value="" ${!d.gender?'selected':''}>不填</option><option value="male" ${d.gender==='male'?'selected':''}>男生</option><option value="female" ${d.gender==='female'?'selected':''}>女生</option></select></div></div><div class="fg3"><div class="fr"><label>年齡（歲）</label><input type="number" id="ns-ay" value="${d.ageY||''}" min="0" max="18" placeholder="Y"></div><div class="fr"><label>年齡（月）</label><input type="number" id="ns-am" value="${d.ageM||''}" min="0" max="11" placeholder="M"></div><div class="fr"><label>身高（cm）</label><input type="number" id="ns-h" value="${d.height||''}" min="50" max="200" placeholder="cm"></div></div><div class="section-div">家長資料</div><div class="fg"><div class="fr"><label>家長姓名</label><input type="text" id="ns-p" value="${d.parent||''}" placeholder="家長姓名"></div><div class="fr"><label>聯絡電話</label><input type="tel" id="ns-ph" value="${d.phone||''}" placeholder="手機號碼"></div></div><div class="fr"><label>家長 LINE ID</label><input type="text" id="ns-line" value="${d.lineId||''}" placeholder="LINE ID"></div><div class="section-div">學生課程</div><div class="fr"><label>選擇課程（自動帶入堂數）</label><select id="ns-sess" onchange="nsAutoLessons()"><option value="">— 未指定 —</option>${sessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" ${(d.sessionId||'')==s.id?'selected':''}>${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;}).join('')}</select></div><div id="ns-lessons-display" style="background:#EAF3DE;border-radius:8px;padding:7px 9px;font-size:11px;color:#27500A;margin-bottom:2px;display:none">自動帶入每期堂數：<strong id="ns-lessons-val"></strong></div><div class="fr"><label>每期堂數（可手動調整）</label><select id="ns-l">${LESSON_OPTIONS.map(n=>`<option value="${n}" ${(d.period||6)===n?'selected':''}>${n} 堂</option>`).join('')}</select></div>`;}
+function openEnrollForStudent(stId) {
+  const st = getSt(stId);
+  const termOpts = [...terms].sort((a,b)=>b.startDate.localeCompare(a.startDate))
+    .map(t=>`<option value="${t.id}">${t.name} (${termStatus(t).label})</option>`).join('');
+  const alreadyTerms = [...new Set(enrolls.filter(e=>e.studentId===stId).map(e=>e.termId))];
+
+  document.getElementById('mod-title').textContent = '為 '+st.name+' 報名課程';
+  document.getElementById('mod-body').innerHTML =
+    '<div class="fr"><label>選擇期別 *</label>' +
+    '<select id="es-term" onchange="esFilterSess()">'+termOpts+'</select></div>' +
+    '<div class="fr"><label>選擇課程 *</label>' +
+    '<select id="es-sess"><option value="">請先選擇期別</option></select></div>' +
+    (alreadyTerms.length ? '<div style="font-size:11px;color:#999;margin-bottom:8px">已報名期別：'+alreadyTerms.map(tid=>{const t=terms.find(x=>x.id===tid);return t?t.name:'?';}).join('、')+'</div>' : '') +
+    '<button class="btn btn-pink" style="width:100%" onclick="submitEnrollForStudent(\''+stId+'\')">確認報名</button>';
+  document.getElementById('overlay').style.display='flex';
+  esFilterSess();
+}
+
+function esFilterSess() {
+  const termId = document.getElementById('es-term') ? document.getElementById('es-term').value : '';
+  const sel    = document.getElementById('es-sess');
+  if (!sel) return;
+  const t = terms.find(x=>x.id===termId);
+  const filtered = t ? sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)) : [];
+  sel.innerHTML = '<option value="">— 選擇課程 —</option>' +
+    filtered.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{
+      const v=getVenue(s.venueId);const pr=getSessPrice(s.id);
+      const cnt=getEnrolled(termId,s.id).length;
+      return '<option value="'+s.id+'">'+(v?'['+v.shortName+'] ':'')+s.day+' '+s.time+' — '+s.name+' ('+cnt+'/'+s.capacity+'人'+(pr!=null?' · '+fmt(pr):'')+')' + '</option>';
+    }).join('');
+}
+
+async function submitEnrollForStudent(stId) {
+  const termId = document.getElementById('es-term') ? document.getElementById('es-term').value : '';
+  const sessId = document.getElementById('es-sess') ? document.getElementById('es-sess').value : '';
+  if (!termId||!sessId) { alert('請選擇期別和課程'); return; }
+  const dup = enrolls.find(e=>e.studentId===stId&&e.termId===termId&&e.sessionId===sessId);
+  if (dup) { alert('此學生已報名此課程'); return; }
+  const cnt  = getEnrolled(termId,sessId).length;
+  const sess = getSess(sessId);
+  const status = sess&&cnt>=sess.capacity?'waitlist':'enrolled';
+  enrolls.push({id:'e'+Date.now(),termId,sessionId:sessId,studentId:stId,
+    status,enrollDate:today(),createdAt:today()});
+  await saveCol('enrolls',enrolls);
+  closeMod(); renderStudents(); renderDash();
+  hint(status==='enrolled'?'報名成功 ✓':'已加入候補名單');
+}
+
+
+function renderStudents(){const q=(document.getElementById('stu-search').value||'').toLowerCase();let list=students.filter(st=>!q||st.name.toLowerCase().includes(q)||(st.parent||'').toLowerCase().includes(q));if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${owed>0?`<span class="pill pill-red">欠 ${fmt(owed)}</span>`:hasBills?'<span class="pill pill-green">學費結清</span>':'<span class="pill pill-gray">尚未開帳</span>'}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div><div><div style="font-size:10px;color:#999">出席 / 假剩</div><div style="font-size:12px;font-weight:500">${st.attended||0} / ${(st.leaveMax||2)-(st.leaves||0)}</div></div></div><div style="margin-bottom:6px">${stE.map(e=>{const s=getSess(e.sessionId);const t=terms.find(x=>x.id===e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;return s?`<span style="font-size:11px;padding:2px 7px;border-radius:7px;background:#f8f8f8;display:inline-block;margin:2px 2px 0 0">${v?'['+v.shortName+'] ':''}${t?t.name+' ':''}${s.name} ${s.day} ${s.time}${pr!=null?' <span style="color:#27500A">'+fmt(pr)+'</span>':''}</span>`:''}).join('')||'<span style="font-size:11px;color:#999">未報名</span>'}</div><div style="display:flex;gap:5px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="openIssueFeeForStudent('${st.id}')">開帳單</button><button class="btn btn-outline" style="font-size:11px;padding:2px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openEnrollForStudent('${st.id}')">+ 報名期別</button></div></div>`;}).join('');}
+function stuFormHTML(d){return`<div class="section-div">孩子資料</div><div class="fg"><div class="fr"><label>孩子姓名 *</label><input type="text" id="ns-n" value="${d.name||''}" placeholder="姓名"></div><div class="fr"><label>孩子性別</label><select id="ns-g"><option value="" ${!d.gender?'selected':''}>不填</option><option value="male" ${d.gender==='male'?'selected':''}>男生</option><option value="female" ${d.gender==='female'?'selected':''}>女生</option></select></div></div><div class="fg3"><div class="fr"><label>年齡（歲）</label><input type="number" id="ns-ay" value="${d.ageY||''}" min="0" max="18" placeholder="Y"></div><div class="fr"><label>年齡（月）</label><input type="number" id="ns-am" value="${d.ageM||''}" min="0" max="11" placeholder="M"></div><div class="fr"><label>身高（cm）</label><input type="number" id="ns-h" value="${d.height||''}" min="50" max="200" placeholder="cm"></div></div><div class="section-div">家長資料</div><div class="fg"><div class="fr"><label>家長姓名</label><input type="text" id="ns-p" value="${d.parent||''}" placeholder="家長姓名"></div><div class="fr"><label>聯絡電話</label><input type="tel" id="ns-ph" value="${d.phone||''}" placeholder="手機號碼"></div></div><div class="fr"><label>家長 LINE ID</label><input type="text" id="ns-line" value="${d.lineId||''}" placeholder="LINE ID"></div><div class="section-div">學生課程</div><div class="fr"><label>報名期別</label><select id="ns-term" onchange="nsFilterSess()"><option value="">— 選擇期別 —</option>${terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${(d.termId||'')==t.id?'selected':''} ${termStatus(t).key==='active'&&!d.termId?'selected':''} >${t.name}</option>`).join('')}</select></div><div class="fr"><label>選擇課程（自動帶入堂數）</label><select id="ns-sess" onchange="nsAutoLessons()"><option value="">— 未指定 —</option>${sessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" ${(d.sessionId||'')==s.id?'selected':''}>${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;}).join('')}</select></div><div id="ns-lessons-display" style="background:#EAF3DE;border-radius:8px;padding:7px 9px;font-size:11px;color:#27500A;margin-bottom:2px;display:none">自動帶入每期堂數：<strong id="ns-lessons-val"></strong></div><div class="fr"><label>每期堂數（可手動調整）</label><select id="ns-l">${LESSON_OPTIONS.map(n=>`<option value="${n}" ${(d.period||6)===n?'selected':''}>${n} 堂</option>`).join('')}</select></div>`;}
 function nsAutoLessons(){const sel=document.getElementById('ns-sess');const opt=sel.options[sel.selectedIndex];const lessons=opt&&opt.dataset.lessons?parseInt(opt.dataset.lessons):null;const display=document.getElementById('ns-lessons-display');const val=document.getElementById('ns-lessons-val');const lSel=document.getElementById('ns-l');if(lessons&&lessons>0){display.style.display='block';val.textContent=lessons+' 堂/期';if(lSel)lSel.value=lessons;}else{display.style.display='none';}}
-function getStuData(){const sel=document.getElementById('ns-sess');return{name:document.getElementById('ns-n').value.trim(),gender:document.getElementById('ns-g').value,ageY:parseInt(document.getElementById('ns-ay').value)||0,ageM:parseInt(document.getElementById('ns-am').value)||0,height:parseFloat(document.getElementById('ns-h').value)||0,parent:document.getElementById('ns-p').value.trim(),phone:document.getElementById('ns-ph').value.trim(),lineId:document.getElementById('ns-line').value.trim(),sessionId:sel?sel.value:'',period:parseInt(document.getElementById('ns-l').value)||6};}
+function nsCalcAge() {
+  const birthEl = document.getElementById('ns-birth');
+  if (!birthEl || !birthEl.value) return;
+  const parts = birthEl.value.split('-').map(Number);
+  const by=parts[0], bm=parts[1]||1;
+  const now = new Date();
+  let ageY = now.getFullYear()-by;
+  let ageM = (now.getMonth()+1)-bm;
+  if(ageM<0){ageY--;ageM+=12;}
+  const ayEl=document.getElementById('ns-ay'); if(ayEl) ayEl.value=Math.max(0,ageY);
+  const amEl=document.getElementById('ns-am'); if(amEl) amEl.value=Math.max(0,ageM);
+}
+
+
+function getStuData(){
+  const sel=document.getElementById('ns-sess');
+  const termSel=document.getElementById('ns-term');
+  return{
+    name:    document.getElementById('ns-n').value.trim(),
+    gender:  document.getElementById('ns-g').value,
+    ageY:    parseInt(document.getElementById('ns-ay').value)||0,
+    ageM:    parseInt(document.getElementById('ns-am').value)||0,
+    height:  parseFloat(document.getElementById('ns-h').value)||0,
+    parent:  document.getElementById('ns-p').value.trim(),
+    phone:   document.getElementById('ns-ph').value.trim(),
+    lineId:  document.getElementById('ns-line').value.trim(),
+    sessionId: sel?sel.value:'',
+    termId:  termSel?termSel.value:'',
+    period:  parseInt(document.getElementById('ns-l').value)||6
+  };
+}
+function nsFilterSess(){
+  // Filter session options by selected term
+  const termSel=document.getElementById('ns-term');
+  const sessSel=document.getElementById('ns-sess');
+  if(!termSel||!sessSel)return;
+  const t=terms.find(x=>x.id===termSel.value);
+  const filtered=t?sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)):sessions;
+  sessSel.innerHTML='<option value="">— 未指定 —</option>'+
+    filtered.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{
+      const v=getVenue(s.venueId);const pr=getSessPrice(s.id);
+      return`<option value="${s.id}" data-lessons="${s.periodLessons}">${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;
+    }).join('');
+  nsAutoLessons();
+}
 function openAddStudent(){document.getElementById('mod-title').textContent='新增學生';document.getElementById('mod-body').innerHTML=stuFormHTML({})+'<button class="btn btn-pink" style="width:100%;margin-top:8px" onclick="addStu()">確認新增</button>';document.getElementById('overlay').style.display='flex';setTimeout(nsAutoLessons,50);}
 function openEditStudent(id){const st=students.find(s=>s.id===id);if(!st)return;document.getElementById('mod-title').textContent='編輯 — '+st.name;document.getElementById('mod-body').innerHTML=stuFormHTML(st)+`<div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-pink" style="flex:1" onclick="saveStudent('${id}')">儲存</button><button class="btn btn-red" onclick="delStu('${id}');closeMod()">刪除</button></div>`;document.getElementById('overlay').style.display='flex';setTimeout(nsAutoLessons,50);}
-async function addStu(){const d=getStuData();if(!d.name){alert('請輸入學生姓名');return;}students.push({id:'s'+Date.now(),...d,attended:0,leaves:0,makeups:0,leaveMax:2,startDate:today()});await saveCol('students',students);closeMod();renderStudents();renderDash();}
-async function saveStudent(id){const d=getStuData();if(!d.name){alert('請輸入學生姓名');return;}const i=students.findIndex(s=>s.id===id);if(i>=0)students[i]={...students[i],...d};await saveCol('students',students);closeMod();renderStudents();}
+async function addStu(){
+  const d=getStuData();
+  if(!d.name){alert('請輸入學生姓名');return;}
+  const st={id:'s'+Date.now(),...d,attended:0,leaves:0,makeups:0,leaveMax:2,startDate:today()};
+  students.push(st);
+  // Create enrollment if session and term selected
+  if(d.sessionId && d.termId){
+    const cnt=getEnrolled(d.termId,d.sessionId).length;
+    const sess=getSess(d.sessionId);
+    const status=sess&&cnt>=sess.capacity?'waitlist':'enrolled';
+    enrolls.push({id:'e'+Date.now(),termId:d.termId,sessionId:d.sessionId,studentId:st.id,status,enrollDate:today(),createdAt:today()});
+    await saveCol('enrolls',enrolls);
+  }
+  await saveCol('students',students);
+  closeMod();renderStudents();renderDash();
+}
+async function saveStudent(id){
+  const d=getStuData();
+  if(!d.name){alert('請輸入學生姓名');return;}
+  const i=students.findIndex(s=>s.id===id);
+  if(i>=0) students[i]={...students[i],...d};
+  // Update/create enrollment if session and term selected
+  if(d.sessionId && d.termId){
+    const existing=enrolls.findIndex(e=>e.studentId===id&&e.termId===d.termId);
+    if(existing>=0){
+      enrolls[existing].sessionId=d.sessionId;
+    } else {
+      const cnt=getEnrolled(d.termId,d.sessionId).length;
+      const sess=getSess(d.sessionId);
+      const status=sess&&cnt>=sess.capacity?'waitlist':'enrolled';
+      enrolls.push({id:'e'+Date.now(),termId:d.termId,sessionId:d.sessionId,studentId:id,status,enrollDate:today(),createdAt:today()});
+    }
+    await saveCol('enrolls',enrolls);
+  }
+  await saveCol('students',students);
+  closeMod();renderStudents();
+}
 async function delStu(id){if(!confirm('確認刪除此學生？'))return;students=students.filter(s=>s.id!==id);await saveCol('students',students);renderStudents();renderDash();}
 function openIssueFeeForStudent(stId) {
   const st = getSt(stId);
