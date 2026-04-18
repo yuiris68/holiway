@@ -542,7 +542,7 @@ let sessVenueFilter='all',feeSub='bills';
 
 
 // ── Save helpers ─────────────────────────────────────
-async function saveCol(col,arr){await fsSave(col,arr);}
+async function saveCol(col,arr){ try { await fsSave(col,arr); } catch(e){ console.warn('saveCol error:',e); } }
 
 
 // ── Core helpers ─────────────────────────────────────
@@ -2387,8 +2387,7 @@ function sw(tab, btn) {
       'term-att':()=>{}
     }[tab]||function(){})();
   } catch(e) {
-    console.error('[sw] Error rendering tab '+tab+':', e, e.stack);
-    alert('[sw] Error: ' + e.message + '\nStack: ' + (e.stack||'').slice(0,200));
+    console.error('[sw] Error in tab '+tab+':', e);
   }
 }
 
@@ -2527,8 +2526,6 @@ function renderCoaches() {
   }
   const now = new Date();
   const thisMonth = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  // Debug: log coaches data
-  console.log('[coaches] count:', coaches.length, 'first:', coaches[0]);
   const rows = coaches.filter(c => c && c.name).map(c => {
     const coachColor = c.color || '#888';
     const sessCount = sessions.filter(s => s.coach === c.name).length;
