@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.2</title>
+<title>哈樂維 v4.3</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.2</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.3</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -578,22 +578,140 @@ function enrollBar(e,c,w=0){const p=Math.min(100,Math.round(e/c*100));const f=e>
 
 // ── DASH ─────────────────────────────────────────────
 function renderDash(){
+  const activeTerm = terms.find(t=>termStatus(t).key==='active');
+  const totalOwed  = fees.filter(f=>f.status!=='refunded').reduce((a,f)=>a+feeStatus(f).bal,0);
+  const todaySignins = Object.entries(signinRec)
+    .filter(([k])=>k.includes('|'+today()))
+    .reduce((a,[,r])=>a+Object.values(r).filter(v=>v==='present').length,0);
 
-  const activeTerm=terms.find(t=>termStatus(t).key==='active');
-  const totalOwed=fees.filter(f=>f.status!=='refunded').reduce((a,f)=>a+feeStatus(f).bal,0);
-  const todaySignins=Object.entries(signinRec).filter(([k])=>k.includes('|'+today())).reduce((a,[,r])=>a+Object.values(r).filter(v=>v==='present').length,0);
+  // ── Metrics bar ──────────────────────────────────
   document.getElementById('dash-metrics').innerHTML=`
     <div class="mc"><div class="mc-lbl">進行期別</div><div class="mc-val" style="font-size:13px">${activeTerm?activeTerm.name.replace('2026 ',''):'—'}</div></div>
     <div class="mc"><div class="mc-lbl">在籍學生</div><div class="mc-val">${students.length}</div></div>
     <div class="mc"><div class="mc-lbl">今日簽到</div><div class="mc-val" style="color:#27500A">${todaySignins}</div></div>
     <div class="mc"><div class="mc-lbl">待補課</div><div class="mc-val" style="color:${makeupRec.filter(m=>m.status==='pending').length>0?'#BA7517':'inherit'}">${makeupRec.filter(m=>m.status==='pending').length}</div></div>
     <div class="mc"><div class="mc-lbl">未收學費</div><div class="mc-val" style="color:${totalOwed>0?'#A32D2D':'inherit'}">${fmt(totalOwed)}</div></div>`;
-  const left=activeTerm?`<div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:8px">${activeTerm.name} — 報名概況</div>${sessions.filter(s=>activeTerm.sessions&&activeTerm.sessions.includes(s.id)).sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const cnt=getEnrolled(activeTerm.id,s.id).length;const wt=getWait(activeTerm.id,s.id).length;const pr=getSessPrice(s.id);return`<div style="margin-bottom:7px"><div style="display:flex;align-items:center;gap:5px;margin-bottom:2px"><span class="badge ${s.type}">${tLabel(s.type)}</span><span style="font-size:11px;flex:1">${s.name} · ${s.day} ${s.time}</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div>${enrollBar(cnt,s.capacity,wt)}</div>`;}).join('')||'<div class="empty">無班次</div>'}</div>`:'<div class="card"><div class="empty">目前無進行中期別</div></div>';
-  const right=`<div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:7px">期別時程</div>${[...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate)).slice(0,4).map(t=>{const st=termStatus(t);const cnt=enrolls.filter(e=>e.termId===t.id&&e.status==='enrolled').length;return`<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:0.5px solid #e0e0e0"><div style="flex:1"><div style="font-size:12px;font-weight:500">${t.name}</div><div style="font-size:10px;color:#999">${fmtD(t.startDate)} — ${fmtD(t.endDate)}</div></div><span class="pill ${pillCls(st.key)}">${st.label}</span><span style="font-size:11px;color:#999">${cnt}人</span></div>`;}).join('')}</div></div>`;
-  document.getElementById('dash-body').innerHTML=left+right;
+
+  // ── Timetable ────────────────────────────────────
+  const DAYS = ['週一','週二','週三','週四','週五','週六','週日'];
+  const typeColor = {adv:'#1A73E8',snake:'#E65100',multi:'#7B1FA2',yoyo:'#1D9E75',halou:'#BA7517'};
+  const typeName  = {adv:'ADV',snake:'蛇板',multi:'多元',yoyo:'幼幼',halou:'外課'};
+
+  // Group sessions by venue
+  const venues2 = [...new Set(sessions.map(s=>s.venueId))].map(vid=>getVenue(vid)||{id:vid,name:'其他',color:'#888',shortName:'?'});
+
+  // Collect all time slots across all sessions
+  const allTimes = [...new Set(sessions.map(s=>s.time))].sort();
+
+  // Build timetable per venue
+  const tables = venues2.map(v => {
+    const vsess = sessions.filter(s=>s.venueId===v.id);
+    if (!vsess.length) return '';
+
+    // Get unique times for this venue
+    const times = [...new Set(vsess.map(s=>s.time))].sort();
+
+    // Build grid: rows=times, cols=days
+    const headerRow = `<tr>
+      <th style="background:${v.color};color:#fff;min-width:90px;font-size:11px">時段</th>
+      ${DAYS.map(d=>`<th style="background:${v.color}22;color:${v.color};font-size:12px;min-width:90px">${d}</th>`).join('')}
+    </tr>`;
+
+    const bodyRows = times.map(time => {
+      const cells = DAYS.map(day => {
+        const s = vsess.find(x=>x.time===time&&x.day===day);
+        if (!s) return '<td style="background:#fafafa"></td>';
+
+        const cnt  = activeTerm ? getEnrolled(activeTerm.id,s.id).length : 0;
+        const cap  = s.capacity;
+        const pct  = cap>0 ? Math.round(cnt/cap*100) : 0;
+        const isFull = cnt>=cap;
+        const pr   = getSessPrice(s.id);
+        const tcolor = typeColor[s.type]||'#555';
+        const tname  = typeName[s.type]||s.type;
+        const coachObj = coaches.find(c=>c.name===s.coach)||{color:'#888'};
+
+        return `<td style="padding:4px;vertical-align:top">
+          <div style="background:${tcolor};color:#fff;border-radius:6px;padding:5px 7px;font-size:11px;cursor:pointer;min-height:58px"
+            onclick="sw('sessions',document.querySelectorAll('.nb')[2])" title="${s.name} · ${s.coach}">
+            <div style="font-weight:600;font-size:12px;margin-bottom:2px">${tname}</div>
+            <div style="font-size:10px;opacity:.9;margin-bottom:3px">${s.name.replace(tname,'').trim()||s.name}</div>
+            <div style="display:flex;align-items:center;gap:3px">
+              <span style="background:rgba(0,0,0,.2);border-radius:4px;padding:1px 5px;font-size:9px;font-weight:500">${s.coach}</span>
+            </div>
+            ${activeTerm?`<div style="margin-top:4px">
+              <div style="background:rgba(255,255,255,.25);border-radius:3px;height:4px">
+                <div style="background:${isFull?'#ff4444':'rgba(255,255,255,.9)'};width:${pct}%;height:100%;border-radius:3px;transition:width .3s"></div>
+              </div>
+              <div style="font-size:9px;margin-top:2px;opacity:.9">${cnt}/${cap}人</div>
+            </div>`:''}
+            ${pr!=null?`<div style="font-size:9px;margin-top:2px;opacity:.85">NT$${pr.toLocaleString()}</div>`:''}
+          </div>
+        </td>`;
+      }).join('');
+
+      return `<tr>
+        <td style="font-size:11px;color:#666;white-space:nowrap;font-weight:500;background:#f8f8f8;padding:6px 8px">${time}</td>
+        ${cells}
+      </tr>`;
+    }).join('');
+
+    return `<div style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="background:${v.color};color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:600">${v.name||v.shortName}</span>
+        <span style="font-size:11px;color:#999">${vsess.length} 班次</span>
+      </div>
+      <div style="overflow-x:auto;border-radius:10px;border:0.5px solid #e0e0e0">
+        <table style="border-collapse:collapse;width:100%;min-width:600px">
+          <thead>${headerRow}</thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Right panel: term timeline ───────────────────
+  const termList = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate)).slice(0,5)
+    .map(t=>{
+      const st=termStatus(t);
+      const cnt=enrolls.filter(e=>e.termId===t.id&&e.status==='enrolled').length;
+      return `<div style="display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:0.5px solid #e0e0e0">
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:500">${t.name}</div>
+          <div style="font-size:10px;color:#999">${fmtD(t.startDate)} — ${fmtD(t.endDate)}</div>
+        </div>
+        <span class="pill ${pillCls(st.key)}">${st.label}</span>
+        <span style="font-size:11px;color:#999">${cnt}人</span>
+      </div>`;
+    }).join('');
+
+  // ── Legend ───────────────────────────────────────
+  const legend = Object.entries(typeColor).map(([k,c])=>
+    `<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px">
+      <span style="width:10px;height:10px;border-radius:3px;background:${c};display:inline-block"></span>
+      <span style="font-size:11px;color:#666">${typeName[k]}</span>
+    </span>`
+  ).join('');
+
+  const timetableHTML = sessions.length
+    ? `<div class="card" style="padding:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:500">週課表</span>
+          <span style="font-size:11px;color:#999">${activeTerm?activeTerm.name:'全部班次'}</span>
+          <div style="margin-left:auto">${legend}</div>
+        </div>
+        ${tables}
+      </div>`
+    : '<div class="card"><div class="empty">尚未建立班次，請至「課程」頁新增</div></div>';
+
+  document.getElementById('dash-body').innerHTML = timetableHTML +
+    `<div style="margin-top:12px"><div class="card">
+      <div style="font-size:13px;font-weight:500;margin-bottom:7px">期別時程</div>
+      ${termList||'<div class="empty">尚無期別</div>'}
+    </div></div>`;
 }
 
-// ── VENUES ───────────────────────────────────────────
+
 function renderVenues(){document.getElementById('venues-body').innerHTML=venues.map(v=>{const vS=sessions.filter(s=>s.venueId===v.id);return`<div class="card" style="border-left:3px solid ${v.color}"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:30px;height:30px;border-radius:8px;background:${v.color}20;display:flex;align-items:center;justify-content:center;font-size:15px">${v.icon||'📍'}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${v.name}</div><div style="font-size:11px;color:#999">滿班${v.capacity}人 · ${vS.length}班次 · ${v.description||''}</div></div><span class="pill ${v.status==='active'?'pill-green':'pill-gray'}">${v.status==='active'?'使用中':'停用'}</span></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditVenue('${v.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteVenue('${v.id}')">刪除</button></div></div>`;}).join('')||'<div class="empty">尚無場地</div>';}
 function openAddVenue(){renderVenueForm(null,{name:'',shortName:'',type:'classroom',color:VENUE_COLORS[venues.length%VENUE_COLORS.length],icon:'📍',capacity:15,description:'',status:'active'});}
 function openEditVenue(id){const v=getVenue(id);if(v)renderVenueForm(id,v);}
