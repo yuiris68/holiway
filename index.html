@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v5.2 BUILD 20260418 -->
+<!-- HOLIWAY v5.2 BUILD 20260418B -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v5.2</title>
+<title>哈樂維 v5.3</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -220,7 +220,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.2</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.3</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -2581,12 +2581,31 @@ function openEditCoach(id) { const c=coaches.find(x=>x.id===id); if(c) renderCoa
 
 function renderCoachForm(editId,d) {
   const COLORS=[
-    '#378ADD','#0C6BAD','#1565C0','#0D47A1',
-    '#1D9E75','#27500A','#639922','#2E7D32',
-    '#D4537E','#E91E63','#A32D2D','#D85A30',
-    '#BA7517','#F57F17','#8B4513','#FF6F00',
-    '#7F77DD','#3C3489','#9C27B0','#6A1B9A',
-    '#888780','#555555','#37474F','#00796B',
+    // 高辨識度24色 - 色相均勻分布
+    '#E53935', // 紅
+    '#E91E63', // 玫瑰紅
+    '#FF6F00', // 深橘
+    '#F57C00', // 橘
+    '#F9A825', // 琥珀黃
+    '#7CB342', // 草綠
+    '#2E7D32', // 深綠
+    '#00796B', // 青綠
+    '#0288D1', // 天藍
+    '#1565C0', // 深藍
+    '#283593', // 靛藍
+    '#4527A0', // 深紫
+    '#7B1FA2', // 紫
+    '#AD1457', // 深玫瑰
+    '#6D4C41', // 棕
+    '#37474F', // 深藍灰
+    '#546E7A', // 藍灰
+    '#757575', // 中灰
+    '#00838F', // 青藍
+    '#00695C', // 深青
+    '#558B2F', // 橄欖綠
+    '#9E9D24', // 黃綠
+    '#4E342E', // 深棕
+    '#BF360C', // 磚紅
   ];
   const swatches=COLORS.map(c=>`<span style="width:30px;height:30px;border-radius:50%;border:3px solid ${d.color===c?'#1a1a1a':'#e0e0e0'};cursor:pointer;display:inline-block;background:${c};margin:3px;box-shadow:0 1px 3px rgba(0,0,0,.2)" onclick="document.getElementById('cf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');
   document.getElementById('mod-title').textContent = editId?'編輯教練':'新增教練';
