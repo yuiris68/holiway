@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.3</title>
+<title>哈樂維 v4.4</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.3</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.4</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -245,7 +245,8 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     <div id="panel-dash" class="panel active"><div class="metrics" id="dash-metrics"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px" id="dash-body"></div></div>
     <div id="panel-venues" class="panel"><div class="sh"><h2>場地管理</h2><button class="btn btn-pink" style="margin-left:auto" onclick="openAddVenue()">+ 新增場地</button></div><div id="venues-body"></div></div>
     <div id="panel-sessions" class="panel">
-      <div class="sh"><h2>課程管理</h2><div style="display:flex;gap:4px;flex-wrap:wrap" id="track-tabs"></div><button class="btn btn-pink" style="margin-left:auto" onclick="openAddSession()">+ 新增課程</button></div>
+      <div class="sh"><h2>課程管理</h2>
+        <button class="btn btn-outline" style="font-size:11px" onclick="openManageTypes()">⚙ 課程類型</button><div style="display:flex;gap:4px;flex-wrap:wrap" id="track-tabs"></div><button class="btn btn-pink" style="margin-left:auto" onclick="openAddSession()">+ 新增課程</button></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px" id="sess-grid"></div>
     </div>
     <div id="panel-terms" class="panel">
@@ -533,7 +534,7 @@ const DAY_ORDER={週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:7}
 const DAYS=['週一','週二','週三','週四','週五','週六','週日'];
 const LESSON_OPTIONS=[1,2,3,4,5,6,7,8];
 const VENUE_COLORS=['#378ADD','#639922','#D4537E','#BA7517','#7F77DD','#1D9E75','#D85A30','#888780'];
-function tLabel(t){return{adv:'ADV',snake:'蛇板',multi:'多元',yoyo:'幼幼',halou:'外課'}[t]||t;}
+// tLabel moved to type management section
 
 let venues=[],sessions=[],terms=[],enrolls=[],students=[],signinRec={},makeupRec=[],fees=[],txns=[],pricing=[];
 let coaches=[],subLog=[],pendingSubs=[];
@@ -596,6 +597,8 @@ function renderDash(){
   const DAYS = ['週一','週二','週三','週四','週五','週六','週日'];
   const typeColor = {adv:'#1A73E8',snake:'#E65100',multi:'#7B1FA2',yoyo:'#1D9E75',halou:'#BA7517'};
   const typeName  = {adv:'ADV',snake:'蛇板',multi:'多元',yoyo:'幼幼',halou:'外課'};
+  // Use coach color if set, else fall back to type color
+  const getSessColor = s => { const co=coaches.find(c=>c.name===s.coach); return (co&&co.color)||typeColor[s.type]||'#555'; };
 
   // Group sessions by venue
   const venues2 = [...new Set(sessions.map(s=>s.venueId))].map(vid=>getVenue(vid)||{id:vid,name:'其他',color:'#888',shortName:'?'});
@@ -627,8 +630,8 @@ function renderDash(){
         const pct  = cap>0 ? Math.round(cnt/cap*100) : 0;
         const isFull = cnt>=cap;
         const pr   = getSessPrice(s.id);
-        const tcolor = typeColor[s.type]||'#555';
-        const tname  = typeName[s.type]||s.type;
+        const tcolor = getSessColor(s);
+        const tname  = typeName[s.type]||tLabel(s.type)||s.type;
         const coachObj = coaches.find(c=>c.name===s.coach)||{color:'#888'};
 
         return `<td style="padding:4px;vertical-align:top">
@@ -727,11 +730,11 @@ function renderSessions(){
   document.getElementById('track-tabs').innerHTML=vOpts.map(id=>`<button class="chip ${sessVenueFilter===id?'on':''}" onclick="sessVenueFilter='${id}';renderSessions()">${id==='all'?'全部場地':(getVenue(id)?.shortName||id)}</button>`).join('');
   let list=[...sessions];if(sessVenueFilter!=='all')list=list.filter(s=>s.venueId===sessVenueFilter);
   list.sort((a,b)=>{const va=getVenue(a.venueId),vb=getVenue(b.venueId);if((va?.name||'')!==(vb?.name||''))return(va?.name||'').localeCompare(vb?.name||'');return(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9);});
-  document.getElementById('sess-grid').innerHTML=list.length?list.map(s=>{const v=getVenue(s.venueId);const totalE=sessEnrolledTotal(s.id);const pct=Math.min(100,Math.round(totalE/s.capacity*100));const pr=getSessPrice(s.id);return`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:6px${v?`;border-top:2px solid ${v.color}`:''}"><div style="display:flex;align-items:center;gap:6px"><span class="badge ${s.type}">${tLabel(s.type)}</span><div style="font-size:13px;font-weight:500;flex:1">${s.name}</div>${v?`<span style="font-size:9px;padding:1px 5px;border-radius:4px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}</div><div style="font-size:11px;color:#999"><div style="display:flex;gap:10px;margin-bottom:2px"><span>${s.day} ${s.time}</span><span style="color:#27500A;font-weight:500">${s.periodLessons} 堂/期</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div><div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px"><span style="font-size:10px">報名</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div></div></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div></div>`;}).join(''):'<div class="empty" style="grid-column:1/-1">沒有課程</div>';}
+  document.getElementById('sess-grid').innerHTML=list.length?list.map(s=>{const v=getVenue(s.venueId);const totalE=sessEnrolledTotal(s.id);const pct=Math.min(100,Math.round(totalE/s.capacity*100));const pr=getSessPrice(s.id);return`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:6px${v?`;border-top:2px solid ${v.color}`:''}"><div style="display:flex;align-items:center;gap:6px"><span class="badge ${s.type}">${tLabel(s.type)}</span><div style="font-size:13px;font-weight:500;flex:1">${s.name}</div>${v?`<span style="font-size:9px;padding:1px 5px;border-radius:4px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}</div><div style="font-size:11px;color:#999"><div style="display:flex;gap:10px;margin-bottom:2px;flex-wrap:wrap"><span>${s.day} ${s.time}</span><span style="color:#27500A;font-weight:500">${s.periodLessons} 堂/期</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div><div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">${(()=>{const co=coaches.find(c=>c.name===s.coach)||{};return`<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:18px;height:18px;border-radius:50%;background:${co.color||'#aaa'}30;color:${co.color||'#666'};font-size:9px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${(s.coach||'?')[0]}</span><span style="font-size:11px;color:#555;font-weight:500">${s.coach||'未指定'}</span></span>`;})()}</div><div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px"><span style="font-size:10px">報名</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div></div></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div></div>`;}).join(''):'<div class="empty" style="grid-column:1/-1">沒有課程</div>';}
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
-function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type"><option value="adv" ${d.type==='adv'?'selected':''}>ADV 滑步車</option><option value="snake" ${d.type==='snake'?'selected':''}>蛇板</option><option value="multi" ${d.type==='multi'?'selected':''}>多元課程</option><option value="yoyo" ${d.type==='yoyo'?'selected':''}>幼幼滑步車</option><option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option></select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
+function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
 function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0)sessions[i]={...sessions[i],...d};if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
@@ -3428,6 +3431,123 @@ const _baseBuildFee = buildFeTermFilter;
 function buildFeTermFilter(){
   _baseBuildFee();
   buildFeeMonthFilter();
+}
+
+
+// ── Session Type Management ───────────────────────────────────────
+// Built-in types
+const BUILTIN_TYPES = [
+  {id:'adv',   label:'ADV 滑步車', color:'#1A73E8'},
+  {id:'snake', label:'蛇板',       color:'#E65100'},
+  {id:'multi', label:'多元課程',   color:'#7B1FA2'},
+  {id:'yoyo',  label:'幼幼滑步車', color:'#1D9E75'},
+  {id:'halou', label:'哈樂屋外課', color:'#BA7517'},
+];
+let customTypes = []; // loaded from Firebase
+
+function getSessionTypes() {
+  return [...BUILTIN_TYPES, ...customTypes];
+}
+
+function tLabel(t) {
+  const found = getSessionTypes().find(x=>x.id===t);
+  return found ? found.label : t;
+}
+
+function tColor(t) {
+  const found = getSessionTypes().find(x=>x.id===t);
+  return found ? found.color : '#888';
+}
+
+async function loadCustomTypes() {
+  try {
+    const snap = await db.collection('sessionTypes').get();
+    customTypes = snap.docs.map(d=>({id:d.id,...d.data()}));
+  } catch(e) { customTypes = []; }
+}
+
+function openManageTypes() {
+  renderTypeManager();
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function renderTypeManager() {
+  const allTypes = getSessionTypes();
+  document.getElementById('mod-title').textContent = '課程類型管理';
+  document.getElementById('mod-body').innerHTML = `
+    <div style="margin-bottom:10px">
+      ${allTypes.map(t => {
+        const isBuiltin = BUILTIN_TYPES.some(b=>b.id===t.id);
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid #eee">
+          <span style="width:12px;height:12px;border-radius:3px;background:${t.color||'#888'};flex-shrink:0"></span>
+          <span style="font-size:13px;flex:1">${t.label}</span>
+          <span style="font-size:10px;color:#aaa">${t.id}</span>
+          ${isBuiltin
+            ? '<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:#f0f0f0;color:#999">內建</span>'
+            : `<button class="btn btn-outline" style="font-size:11px;padding:2px 8px" onclick="editCustomType('${t.id}')">編輯</button>
+               <button class="btn btn-red" style="font-size:11px;padding:2px 8px" onclick="deleteCustomType('${t.id}')">刪除</button>`
+          }
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="border-top:0.5px solid #e0e0e0;padding-top:10px">
+      <div style="font-size:12px;font-weight:500;margin-bottom:8px">新增課程類型</div>
+      <div class="fg">
+        <div class="fr"><label>類型名稱 *</label><input type="text" id="new-type-label" placeholder="如：親子課、外課"></div>
+        <div class="fr"><label>ID（英文）*</label><input type="text" id="new-type-id" placeholder="如：parent"></div>
+      </div>
+      <div class="fr"><label>顏色</label>
+        <input type="color" id="new-type-color" value="#378ADD" style="width:60px;height:32px;padding:2px">
+      </div>
+      <button class="btn btn-pink" style="width:100%;margin-top:4px" onclick="addCustomType()">+ 新增類型</button>
+    </div>`;
+}
+
+async function addCustomType() {
+  const label = document.getElementById('new-type-label').value.trim();
+  const id    = document.getElementById('new-type-id').value.trim().toLowerCase().replace(/[^a-z0-9_]/g,'');
+  const color = document.getElementById('new-type-color').value;
+  if (!label || !id) { alert('請填寫名稱和ID'); return; }
+  if (getSessionTypes().some(t=>t.id===id)) { alert('此ID已存在'); return; }
+  const newType = {id, label, color};
+  customTypes.push(newType);
+  await db.collection('sessionTypes').doc(id).set({label, color});
+  renderTypeManager();
+  hint('課程類型已新增 ✓');
+}
+
+function editCustomType(typeId) {
+  const t = customTypes.find(x=>x.id===typeId);
+  if (!t) return;
+  document.getElementById('mod-body').innerHTML += '';
+  // Show inline edit
+  const row = document.querySelector(`[onclick="editCustomType('${typeId}')"]`)?.closest('div[style]');
+  if (!row) { return; }
+  const origHTML = row.innerHTML;
+  row.innerHTML = `
+    <input type="text" id="edit-type-label-${typeId}" value="${t.label}" style="flex:1;font-size:12px">
+    <input type="color" id="edit-type-color-${typeId}" value="${t.color||'#888'}" style="width:40px;height:28px">
+    <button class="btn btn-pink" style="font-size:11px;padding:2px 8px" onclick="saveEditType('${typeId}')">存</button>
+    <button class="btn btn-outline" style="font-size:11px;padding:2px 8px" onclick="renderTypeManager()">取消</button>`;
+}
+
+async function saveEditType(typeId) {
+  const label = document.getElementById('edit-type-label-'+typeId)?.value.trim();
+  const color = document.getElementById('edit-type-color-'+typeId)?.value;
+  if (!label) return;
+  const t = customTypes.find(x=>x.id===typeId);
+  if (t) { t.label=label; t.color=color; }
+  await db.collection('sessionTypes').doc(typeId).set({label,color});
+  renderTypeManager();
+  hint('已更新 ✓');
+}
+
+async function deleteCustomType(typeId) {
+  if (!confirm(`確認刪除「${customTypes.find(x=>x.id===typeId)?.label||typeId}」類型？\n使用此類型的課程仍會保留，但顯示為ID。`)) return;
+  customTypes = customTypes.filter(x=>x.id!==typeId);
+  await db.collection('sessionTypes').doc(typeId).delete();
+  renderTypeManager();
+  hint('已刪除 ✓');
 }
 
 </script>
