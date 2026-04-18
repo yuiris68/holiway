@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.5</title>
+<title>哈樂維 v4.7</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.5</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.7</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -2115,8 +2115,8 @@ function renderTermAttendance(termId) {
 
     // Header: regular dates + makeup columns
     const headerCells = displayDates.map((d,i)=>`<th title="${d}">${fmtD(d).slice(3)}<br><span style="font-size:9px;color:#999">第${i+1}堂</span></th>`).join('') +
-      `<th style="color:#555;font-size:10px;min-width:70px">統計</th>` +
-      `<th colspan="${MAKEUP_EXTRA}" style="color:#7F77DD;background:#EEEDFE;font-size:10px">補課安排<br><span style="font-weight:400;font-size:9px">點＋新增</span></th>`;
+      `<th colspan="${MAKEUP_EXTRA}" style="color:#7F77DD;background:#EEEDFE;font-size:10px;white-space:nowrap">補課安排<br><span style="font-weight:400;font-size:9px">點＋新增</span></th>` +
+      `<th style="color:#555;font-size:10px;min-width:90px;white-space:nowrap">出席統計</th>`;
 
     // Body rows
     const bodyRows = enrolled.map(e => {
@@ -2173,12 +2173,12 @@ function renderTermAttendance(termId) {
       return `<tr>
         <td style="text-align:left;white-space:nowrap;font-weight:500">${st.name}</td>
         ${cells}
-        <td style="min-width:80px;white-space:nowrap">
-          <div style="font-size:11px"><span style="color:#27500A;font-weight:500">出 ${presentCount}</span></div>
-          <div style="font-size:11px"><span style="color:#378ADD">假 ${leaveCount}</span></div>
-          ${absentCount>0?'<div style="font-size:11px"><span style="color:#BA7517">缺 '+absentCount+'</span></div>':''}
-        </td>
         ${mkCells}
+        <td style="min-width:90px;white-space:nowrap;vertical-align:middle;padding:4px 8px;background:#fafafa">
+          <div style="font-size:12px;font-weight:500;color:#27500A">出席 ${presentCount}</div>
+          <div style="font-size:12px;font-weight:500;color:#378ADD">請假 ${leaveCount}</div>
+          ${absentCount>0?`<div style="font-size:12px;font-weight:500;color:#BA7517">缺席 ${absentCount}</div>`:'<div style="font-size:11px;color:#ccc">缺席 0</div>'}
+        </td>
       </tr>`;
     }).join('');
 
@@ -2197,7 +2197,6 @@ function renderTermAttendance(termId) {
           <thead><tr>
             <th style="text-align:left;min-width:70px">學生</th>
             ${headerCells}
-            <th>統計</th>
           </tr></thead>
           <tbody>${bodyRows}</tbody>
         </table>
@@ -3631,9 +3630,102 @@ function showSessionDetail(sessId, termId) {
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-pink" style="flex:1" onclick="closeMod();sw('signin',document.querySelectorAll('.nb')[4])">前往簽到</button>
       <button class="btn btn-outline" style="flex:1" onclick="closeMod();openEditSession('${s.id}')">編輯課程</button>
-      ${t?`<button class="btn btn-outline" style="flex:1" onclick="closeMod();openTermAttendance('${t.id}')">點名總覽</button>`:''}
+      ${t?`<button class="btn btn-outline" style="flex:1" onclick="showSessAttInModal('${s.id}','${termId}')">點名總覽</button>`:''}
     </div>`;
   document.getElementById('overlay').style.display = 'flex';
+}
+
+
+// ── Single session attendance in modal ──────────────────────────
+function showSessAttInModal(sessId, termId) {
+  const s = getSess(sessId); if (!s) return;
+  const t = terms.find(x=>x.id===termId);
+  const v = getVenue(s.venueId);
+  const holidays  = t ? (t.holidays||[]).map(h=>h.date) : [];
+  const sessDates = t ? (t.sessionDates||{}) : {};
+  const sd     = sessDates[sessId] || {};
+  const startD = new Date(sd.start||(t?t.startDate:''));
+  const endD   = new Date(sd.end||(t?t.endDate:''));
+
+  // Generate lesson dates
+  const dayMap = {週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:0};
+  const targetDay = dayMap[s.day];
+  const lessonDates = [];
+  if (t) {
+    const cur = new Date(startD);
+    while (cur <= endD) {
+      if (cur.getDay() === targetDay) {
+        const ds = cur.toISOString().slice(0,10);
+        if (!holidays.includes(ds)) lessonDates.push(ds);
+      }
+      cur.setDate(cur.getDate()+1);
+    }
+  }
+  const displayDates = lessonDates.slice(0, s.periodLessons);
+  const enrolled = t ? getEnrolled(t.id, sessId) : [];
+
+  // Build compact attendance table
+  const headerCols = displayDates.map((d,i) =>
+    `<th style="font-size:10px;padding:4px 6px;text-align:center;background:#f8f8f8;white-space:nowrap">
+      ${fmtD(d).slice(3)}<br>
+      <span style="color:#aaa;font-size:9px">第${i+1}堂</span>
+    </th>`
+  ).join('') + '<th style="font-size:10px;padding:4px 6px;background:#f8f8f8;min-width:90px">統計</th>';
+
+  const bodyRows = enrolled.map(e => {
+    const st = getSt(e.studentId);
+    const cells = displayDates.map(d => {
+      const key    = sessId+'|'+d;
+      const status = (signinRec[key]||{})[e.studentId]||'';
+      const icon   = status==='present'?'✓':status==='leave'?'△':status==='absent'?'✕':'·';
+      const bg     = status==='present'?'#EAF3DE':status==='leave'?'#E6F1FB':status==='absent'?'#FAEEDA':'#f5f5f5';
+      const color  = status==='present'?'#27500A':status==='leave'?'#0C447C':status==='absent'?'#412402':'#ccc';
+      return `<td style="text-align:center;padding:4px">
+        <button style="width:26px;height:26px;border-radius:50%;border:none;background:${bg};color:${color};font-size:11px;cursor:pointer;font-weight:500"
+          onclick="toggleAtt('${sessId}','${d}','${e.studentId}','${termId}','${sessId}');showSessAttInModal('${sessId}','${termId}')"
+        >${icon}</button>
+      </td>`;
+    }).join('');
+    const present = displayDates.filter(d=>(signinRec[sessId+'|'+d]||{})[e.studentId]==='present').length;
+    const leave   = displayDates.filter(d=>(signinRec[sessId+'|'+d]||{})[e.studentId]==='leave').length;
+    const absent  = displayDates.filter(d=>(signinRec[sessId+'|'+d]||{})[e.studentId]==='absent').length;
+    return `<tr>
+      <td style="font-weight:500;font-size:12px;padding:4px 8px;white-space:nowrap">${st.name}</td>
+      ${cells}
+      <td style="padding:4px 8px;background:#fafafa">
+        <div style="font-size:11px;color:#27500A;font-weight:500">出席 ${present}</div>
+        <div style="font-size:11px;color:#378ADD">請假 ${leave}</div>
+        ${absent>0?`<div style="font-size:11px;color:#BA7517">缺席 ${absent}</div>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('mod-title').textContent = s.name + ' — 點名總覽';
+  document.getElementById('mod-body').innerHTML = `
+    <div style="font-size:12px;color:#666;margin-bottom:10px">
+      ${s.day} ${s.time} · ${s.coach}${v?' · '+v.name:''} · ${displayDates.length}/${s.periodLessons}堂
+    </div>
+    ${enrolled.length ? `
+    <div style="overflow-x:auto;margin-bottom:10px">
+      <table style="border-collapse:collapse;width:100%;font-size:12px">
+        <thead><tr>
+          <th style="font-size:10px;padding:4px 8px;background:#f8f8f8;text-align:left;white-space:nowrap">學生</th>
+          ${headerCols}
+        </tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+    <div style="font-size:10px;color:#999;display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <span><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#EAF3DE;color:#27500A;font-size:9px;text-align:center;line-height:14px">✓</span> 出席</span>
+      <span><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#E6F1FB;color:#0C447C;font-size:9px;text-align:center;line-height:14px">△</span> 請假</span>
+      <span><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#FAEEDA;color:#412402;font-size:9px;text-align:center;line-height:14px">✕</span> 缺席</span>
+      <span style="color:#aaa">點圓點可切換狀態</span>
+    </div>` :
+    '<div style="color:#aaa;padding:16px 0;text-align:center">此期別尚無報名學生</div>'}
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-outline" style="flex:1" onclick="showSessionDetail('${sessId}','${termId}')">← 課程資訊</button>
+      <button class="btn btn-pink" style="flex:1" onclick="closeMod();sw('signin',document.querySelectorAll('.nb')[4])">前往簽到</button>
+    </div>`;
 }
 
 </script>
