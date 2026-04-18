@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v6.1</title>
+<title>哈樂維 v6.3</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -220,7 +220,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.1</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.3</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -230,6 +230,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
       <button class="nb" onclick="sw('terms',this)">期別/報名</button>
       <button class="nb" onclick="sw('signin',this)">QR簽到</button>
       <button class="nb" onclick="sw('makeup',this)">補課</button>
+      <button class="nb" onclick="sw('multi',this)">多元券</button>
       <button class="nb" onclick="sw('fee',this)">學費</button>
       <button class="nb" onclick="sw('students',this)">學生</button>
       <button class="nb" onclick="sw('coaches',this)" style="background:#E6F1FB;color:#0C447C;border-color:#378ADD">教練</button>
@@ -772,18 +773,98 @@ async function saveVenue(id){const d=getVFData();if(!d.name){alert('請填寫場
 async function deleteVenue(id){const v=getVenue(id);if(!v)return;if(!confirm(`確認刪除「${v.name}」？`))return;venues=venues.filter(x=>x.id!==id);await saveCol('venues',venues);closeMod();renderVenues();}
 
 // ── SESSIONS ─────────────────────────────────────────
+// ── Session-level run management ─────────────────────────────────
+function openSessionRuns(sessId) {
+  const s = getSess(sessId); if (!s) return;
+  const v = getVenue(s.venueId);
+  const pr = getSessPrice(sessId);
+
+  // Get all terms this session belongs to
+  const sessTerms = terms.filter(t => t.sessions && t.sessions.includes(sessId))
+    .sort((a,b) => b.startDate.localeCompare(a.startDate));
+
+  // Build runs display: each term = one "run"
+  const runsHTML = sessTerms.length ? sessTerms.map(t => {
+    const enrolled = getEnrolled(t.id, sessId);
+    const wait     = getWait(t.id, sessId);
+    const sd       = (t.sessionDates||{})[sessId] || {};
+    const sDate    = s.startDate || sd.start || t.startDate;
+    const eDate    = s.endDate   || sd.end   || t.endDate;
+    const st       = termStatus(t);
+    const termFees = fees.filter(f => f.termId === t.id && enrolled.some(e => e.studentId === f.studentId));
+    const totalBilled = termFees.reduce((a,f) => a+f.amount, 0);
+    const totalPaid   = termFees.reduce((a,f) => a+feeStatus(f).paid, 0);
+
+    return `<div style="border:0.5px solid #e0e0e0;border-radius:10px;padding:11px 13px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:500;flex:1">${t.name}</span>
+        <span class="pill ${pillCls(st.key)}">${st.label}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px">
+        <div style="background:#f8f8f8;border-radius:7px;padding:6px 9px">
+          <div style="font-size:10px;color:#999">上課期間</div>
+          <div style="font-size:11px;font-weight:500">${sDate?fmtD(sDate)+'—'+fmtD(eDate):'依期別設定'}</div>
+        </div>
+        <div style="background:#f8f8f8;border-radius:7px;padding:6px 9px">
+          <div style="font-size:10px;color:#999">報名 / 滿班</div>
+          <div style="font-size:12px;font-weight:600;color:${enrolled.length>=s.capacity?'#A32D2D':'#27500A'}">${enrolled.length} / ${s.capacity}</div>
+        </div>
+        <div style="background:#f8f8f8;border-radius:7px;padding:6px 9px">
+          <div style="font-size:10px;color:#999">學費收款</div>
+          <div style="font-size:11px;font-weight:500;color:#27500A">${fmt(totalPaid)} / ${fmt(totalBilled)}</div>
+        </div>
+      </div>
+      <div style="margin-bottom:6px">
+        <div style="font-size:11px;font-weight:500;color:#555;margin-bottom:4px">報名學生（${enrolled.length}人）</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          ${enrolled.map(e=>{const st2=getSt(e.studentId);const stFee=termFees.find(f=>f.studentId===e.studentId);const feeTag=!stFee?'<span style="font-size:9px;background:#FAEEDA;color:#412402;padding:1px 5px;border-radius:4px">未開帳</span>':feeStatus(stFee).bal>0?'<span style="font-size:9px;background:#FCEBEB;color:#501313;padding:1px 5px;border-radius:4px">欠款</span>':'<span style="font-size:9px;background:#EAF3DE;color:#27500A;padding:1px 5px;border-radius:4px">已繳</span>';return`<span style="display:inline-flex;align-items:center;gap:3px;background:#f0f0f0;border-radius:6px;padding:3px 7px;font-size:12px">${st2.name}${feeTag}</span>`;}).join('')||'<span style="font-size:11px;color:#aaa">尚無報名學生</span>'}
+          ${wait.length?`<span style="font-size:11px;color:#BA7517">候補${wait.length}人</span>`:''}
+        </div>
+      </div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="closeMod();openAddEnroll('${t.id}')">+ 加入學生</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="closeMod();openCourseDates('${t.id}')">📅 設定日期</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="closeMod();openTermAttendance('${t.id}')">📋 點名總覽</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="closeMod();openIssueFeeForTerm('${t.id}')">開帳單</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">此班次尚未加入任何期別<br><small style="color:#bbb">請到「期別/報名」編輯期別，將此班次加入</small></div>';
+
+  document.getElementById('mod-title').textContent = s.name + ' — 開課管理';
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#f8f8f8;border-radius:8px;padding:9px 12px;margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
+      <div><div style="font-size:10px;color:#999">課程</div><div style="font-size:13px;font-weight:500">${s.day} ${s.time}</div></div>
+      <div><div style="font-size:10px;color:#999">教練</div><div style="font-size:13px;font-weight:500">${s.coach}</div></div>
+      <div><div style="font-size:10px;color:#999">滿班人數</div><div style="font-size:13px;font-weight:500">${s.capacity} 人</div></div>
+      <div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:13px;font-weight:500">${s.periodLessons} 堂</div></div>
+      ${pr!=null?`<div><div style="font-size:10px;color:#999">學費</div><div style="font-size:13px;font-weight:500;color:#27500A">${fmt(pr)}</div></div>`:''}
+      ${s.startDate?`<div><div style="font-size:10px;color:#999">本期日期</div><div style="font-size:12px;font-weight:500;color:#378ADD">${fmtD(s.startDate)}—${fmtD(s.endDate||s.startDate)}</div></div>`:''}
+    </div>
+    <div style="font-size:12px;font-weight:500;margin-bottom:8px">開課記錄（${sessTerms.length} 期）</div>
+    ${runsHTML}
+    <div style="margin-top:10px;padding-top:10px;border-top:0.5px solid #e0e0e0">
+      <div style="font-size:11px;color:#999">💡 開新的一期：到「期別/報名」新增期別時勾選此班次，即可開始新一期的招生與管理。</div>
+    </div>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+
 function renderSessions(){
   const vOpts=['all',...venues.map(v=>v.id)];
   document.getElementById('track-tabs').innerHTML=vOpts.map(id=>`<button class="chip ${sessVenueFilter===id?'on':''}" onclick="sessVenueFilter='${id}';renderSessions()">${id==='all'?'全部場地':(getVenue(id)?.shortName||id)}</button>`).join('');
   let list=[...sessions];if(sessVenueFilter!=='all')list=list.filter(s=>s.venueId===sessVenueFilter);
   // Sort: newest first (by id = creation time), then by venue+day
   list.sort((a,b)=>b.id.localeCompare(a.id));
-  document.getElementById('sess-grid').innerHTML=list.length?list.map(s=>{const v=getVenue(s.venueId);const totalE=sessEnrolledTotal(s.id);const pct=Math.min(100,Math.round(totalE/s.capacity*100));const pr=getSessPrice(s.id);return`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:6px${v?`;border-top:2px solid ${v.color}`:''}"><div style="display:flex;align-items:center;gap:6px"><span class="badge ${s.type}">${tLabel(s.type)}</span><div style="font-size:13px;font-weight:500;flex:1">${s.name}</div>${v?`<span style="font-size:9px;padding:1px 5px;border-radius:4px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}</div><div style="font-size:11px;color:#999"><div style="display:flex;gap:10px;margin-bottom:2px;flex-wrap:wrap"><span>${s.day} ${s.time}</span><span style="color:#27500A;font-weight:500">${s.periodLessons} 堂/期</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div><div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">${(()=>{const co=coaches.find(c=>c.name===s.coach)||{};return`<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:18px;height:18px;border-radius:50%;background:${co.color||'#aaa'}30;color:${co.color||'#666'};font-size:9px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${(s.coach||'?')[0]}</span><span style="font-size:11px;color:#555;font-weight:500">${s.coach||'未指定'}</span></span>`;})()}</div><div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px"><span style="font-size:10px">報名</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div></div></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div></div>`;}).join(''):'<div class="empty" style="grid-column:1/-1">沒有課程</div>';}
+  document.getElementById('sess-grid').innerHTML=list.length?list.map(s=>{const v=getVenue(s.venueId);const totalE=sessEnrolledTotal(s.id);const pct=Math.min(100,Math.round(totalE/s.capacity*100));const pr=getSessPrice(s.id);return`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:6px${v?`;border-top:2px solid ${v.color}`:''}"><div style="display:flex;align-items:center;gap:6px"><span class="badge ${s.type}">${tLabel(s.type)}</span><div style="font-size:13px;font-weight:500;flex:1">${s.name}</div>${v?`<span style="font-size:9px;padding:1px 5px;border-radius:4px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}</div><div style="font-size:11px;color:#999"><div style="display:flex;gap:10px;margin-bottom:2px;flex-wrap:wrap"><span>${s.day} ${s.time}</span>${s.startDate?`<span style="color:#378ADD;font-size:10px">${fmtD(s.startDate)}—${fmtD(s.endDate||s.startDate)}</span>`:''}<span style="color:#27500A;font-weight:500">${s.periodLessons} 堂/期</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div><div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">${(()=>{const co=coaches.find(c=>c.name===s.coach)||{};return`<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:18px;height:18px;border-radius:50%;background:${co.color||'#aaa'}30;color:${co.color||'#666'};font-size:9px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${(s.coach||'?')[0]}</span><span style="font-size:11px;color:#555;font-weight:500">${s.coach||'未指定'}</span></span>`;})()}</div><div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px"><span style="font-size:10px">報名</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div></div></div><div style="display:flex;gap:5px"><button class="btn btn-blue" style="font-size:11px;padding:3px 9px;background:#E6F1FB;color:#0C447C;border-color:#378ADD" onclick="openSessionRuns('${s.id}')">📋 開課管理</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div></div>`;}).join(''):'<div class="empty" style="grid-column:1/-1">沒有課程</div>';}
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
-function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
-function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null};}
+function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fg">
+  <div class="fr"><label>本期開始日期</label><input type="date" id="sf-start" value="${d.startDate||''}" placeholder="本期上課開始"></div>
+  <div class="fr"><label>本期結束日期</label><input type="date" id="sf-end" value="${d.endDate||''}" placeholder="本期上課結束"></div>
+</div>
+<div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
+function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null,startDate:document.getElementById('sf-start')?.value||null,endDate:document.getElementById('sf-end')?.value||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0)sessions[i]={...sessions[i],...d};if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function deleteSession(id){const s=getSess(id);if(!s)return;if(!confirm(`確認刪除「${s.name}」？`))return;sessions=sessions.filter(x=>x.id!==id);terms=terms.map(t=>({...t,sessions:(t.sessions||[]).filter(sid=>sid!==id)}));enrolls=enrolls.filter(e=>e.sessionId!==id);pricing=pricing.filter(p=>p.sessId!==id);await saveCol('sessions',sessions);await saveCol('terms',terms);await saveCol('enrolls',enrolls);await saveCol('pricing',pricing);closeMod();renderSessions();}
@@ -2396,8 +2477,9 @@ function renderTermAttendance(termId) {
     if (!enrolled.length) return `<div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">${s.name} · ${s.day} ${s.time}</div><div class="empty">尚無報名學生</div></div>`;
 
     const sd     = sessDates[s.id] || {};
-    const startD = new Date(sd.start||t.startDate);
-    const endD   = new Date(sd.end||t.endDate);
+    // Priority: session's own dates > term sessionDates > term dates
+    const startD = new Date(s.startDate || sd.start || t.startDate);
+    const endD   = new Date(s.endDate || sd.end || t.endDate);
 
     // Generate lesson dates for this weekday
     const dayMap = {週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:0};
@@ -3167,6 +3249,619 @@ async function setSubCoach() {
 // [{id, sessId, date, origCoach, subCoach, subFee, studentCount, isExternal}]
 
 // Load subLog on init
+// ══════════════════════════════════════════════════════════════════
+// 多元課程使用券系統
+// Collections: voucherPacks, multiSchedule, voucherBookings
+// ══════════════════════════════════════════════════════════════════
+
+let voucherPacks    = [];  // 購券記錄
+let multiSchedule   = [];  // 多元課表
+let voucherBookings = [];  // 預約記錄
+
+// ── 初始化載入 ────────────────────────────────────────────────────
+async function loadMultiData() {
+  try {
+    voucherPacks    = await fsGet('voucherPacks');
+    multiSchedule   = await fsGet('multiSchedule');
+    voucherBookings = await fsGet('voucherBookings');
+  } catch(e) {
+    voucherPacks=[]; multiSchedule=[]; voucherBookings=[];
+  }
+}
+
+// ── Tab 切換 ──────────────────────────────────────────────────────
+function switchMultiTab(tab, btn) {
+  ['vouchers','schedule','bookings'].forEach(t => {
+    const el = document.getElementById('multi-pane-'+t);
+    if (el) el.style.display = t===tab ? 'block' : 'none';
+    const b = document.getElementById('multi-tab-'+t);
+    if (b) { b.style.background = t===tab ? '#E6F1FB' : ''; b.style.color = t===tab ? '#0C447C' : ''; b.style.borderColor = t===tab ? '#378ADD' : ''; }
+  });
+  if (tab==='vouchers') renderVouchers();
+  if (tab==='schedule') renderMultiSchedule();
+  if (tab==='bookings') renderMultiBookings();
+}
+
+// ── 券工具函數 ────────────────────────────────────────────────────
+function getStudentVouchers(stId) {
+  return voucherPacks.filter(v => v.studentId === stId && v.status !== 'cancelled');
+}
+function getStudentRemainingVouchers(stId) {
+  const packs = getStudentVouchers(stId);
+  const used  = voucherBookings.filter(b => b.studentId===stId && b.status==='attended').length;
+  const total = packs.reduce((a,v) => a + (v.quantity||0), 0);
+  return Math.max(0, total - used);
+}
+function getStudentTotalVouchers(stId) {
+  return getStudentVouchers(stId).reduce((a,v) => a + (v.quantity||0), 0);
+}
+function isVoucherValid(pack) {
+  return pack.expiryDate >= today() && pack.status !== 'cancelled';
+}
+function getStudentValidRemaining(stId) {
+  // Only count vouchers that are still within expiry
+  const validPacks = getStudentVouchers(stId).filter(isVoucherValid);
+  const validTotal = validPacks.reduce((a,v) => a+(v.quantity||0), 0);
+  const used = voucherBookings.filter(b => b.studentId===stId && b.status==='attended').length;
+  return Math.max(0, validTotal - used);
+}
+
+// ── 券管理頁 ─────────────────────────────────────────────────────
+function renderVouchers() {
+  // Stats
+  const totalStudents = [...new Set(voucherPacks.map(v=>v.studentId))].length;
+  const totalVouchers = voucherPacks.reduce((a,v)=>a+(v.quantity||0),0);
+  const usedVouchers  = voucherBookings.filter(b=>b.status==='attended').length;
+  const statsEl = document.getElementById('voucher-stats');
+  if(statsEl) statsEl.innerHTML = [
+    ['持券學員',totalStudents+'人','#378ADD'],
+    ['總購買張數',totalVouchers+'張','#27500A'],
+    ['已使用',usedVouchers+'張','#BA7517'],
+    ['剩餘',Math.max(0,totalVouchers-usedVouchers)+'張','#1D9E75'],
+  ].map(([lbl,val,col])=>`<div style="background:#f8f8f8;border-radius:10px;padding:10px 13px"><div style="font-size:10px;color:#999">${lbl}</div><div style="font-size:18px;font-weight:600;color:${col}">${val}</div></div>`).join('');
+
+  // Group packs by student
+  const byStudent = {};
+  voucherPacks.forEach(v => {
+    if (!byStudent[v.studentId]) byStudent[v.studentId] = [];
+    byStudent[v.studentId].push(v);
+  });
+
+  const listEl = document.getElementById('voucher-list');
+  if (!listEl) return;
+  if (!Object.keys(byStudent).length) {
+    listEl.innerHTML = '<div class="empty">尚無多元課程券，點「+ 新增使用券」開始</div>';
+    return;
+  }
+  listEl.innerHTML = Object.entries(byStudent).map(([stId, packs]) => {
+    const st = getSt(stId);
+    const remaining = getStudentValidRemaining(stId);
+    const total     = packs.reduce((a,v)=>a+(v.quantity||0),0);
+    const used      = voucherBookings.filter(b=>b.studentId===stId&&b.status==='attended').length;
+    const nearExpiry = packs.some(v => isVoucherValid(v) && v.expiryDate <= addWeeks(today(), 4));
+    return `<div class="card" style="border-left:3px solid ${remaining===0?'#ccc':nearExpiry?'var(--amber)':'var(--green)'}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div class="av av-pink">${(st.name||'?')[0]}</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${st.name}</div>
+          <div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:20px;font-weight:700;color:${remaining===0?'#ccc':remaining<=3?'#A32D2D':'#27500A'}">${remaining}</div>
+          <div style="font-size:10px;color:#999">剩餘張數</div>
+        </div>
+      </div>
+      <div style="background:#f8f8f8;border-radius:8px;padding:8px 11px;margin-bottom:8px">
+        ${packs.sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)).map(v => {
+          const valid = isVoucherValid(v);
+          return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:0.5px solid #eee">
+            <span style="font-size:11px;flex:1">${fmtD(v.purchaseDate)} 購入 <strong>${v.quantity}張</strong></span>
+            <span style="font-size:10px;color:${v.expiryDate<today()?'#A32D2D':v.expiryDate<=addWeeks(today(),4)?'#BA7517':'#999'}">到期：${fmtD(v.expiryDate)}</span>
+            <span style="font-size:10px;padding:1px 6px;border-radius:5px;background:${valid?'#EAF3DE':'#f0f0f0'};color:${valid?'#27500A':'#999'}">${valid?'有效':'已過期'}</span>
+          </div>`;
+        }).join('')}
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:#666;margin-top:5px">
+          <span>共購入 ${total} 張 · 已用 ${used} 張</span>
+          <span style="color:#27500A;font-weight:500">剩餘 ${remaining} 張</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="openAddVoucherForStudent('${stId}')">+ 增購使用券</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openVoucherHistory('${stId}')">使用紀錄</button>
+        <button class="btn btn-blue" style="font-size:11px;padding:3px 9px;background:#E6F1FB;color:#0C447C;border-color:#378ADD" onclick="openManualBooking('${stId}')">+ 預約時段</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── 新增使用券 ────────────────────────────────────────────────────
+function openAddVoucher() {
+  const stuOpts = students.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  const expDate = addWeeks(today(), 52);
+  document.getElementById('mod-title').textContent = '新增多元課程使用券';
+  document.getElementById('mod-body').innerHTML = `
+    <div class="info-box" style="background:#F3F0FE;border-color:#C5BEEE;color:#4527A0">
+      🎟 使用券購買後有效期一年，學員出席後自動扣抵。
+    </div>
+    <div class="fr"><label>學員 *</label>
+      <select id="av-stu">${stuOpts}</select>
+    </div>
+    <div class="fg">
+      <div class="fr"><label>購買張數 *</label>
+        <input type="number" id="av-qty" value="10" min="1" max="100" step="1">
+      </div>
+      <div class="fr"><label>每張費用 (NT$)</label>
+        <input type="number" id="av-price" value="" placeholder="選填" min="0" step="100">
+      </div>
+    </div>
+    <div class="fg">
+      <div class="fr"><label>購買日期</label>
+        <input type="date" id="av-purchase" value="${today()}">
+      </div>
+      <div class="fr"><label>到期日（預設一年）</label>
+        <input type="date" id="av-expiry" value="${expDate}">
+      </div>
+    </div>
+    <div class="fr"><label>備註</label>
+      <input type="text" id="av-note" placeholder="如：首購優惠、補購...">
+    </div>
+    <button class="btn btn-pink" style="width:100%;margin-top:4px" onclick="createVoucherPack()">確認新增使用券</button>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function openAddVoucherForStudent(stId) {
+  const st = getSt(stId);
+  const expDate = addWeeks(today(), 52);
+  document.getElementById('mod-title').textContent = '新增使用券 — ' + st.name;
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#F3F0FE;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px;color:#4527A0">
+      目前剩餘：<strong>${getStudentValidRemaining(stId)} 張</strong>
+    </div>
+    <div class="fg">
+      <div class="fr"><label>購買張數 *</label>
+        <input type="number" id="av-qty" value="10" min="1" max="100">
+      </div>
+      <div class="fr"><label>每張費用 (NT$)</label>
+        <input type="number" id="av-price" value="" placeholder="選填" min="0" step="100">
+      </div>
+    </div>
+    <div class="fg">
+      <div class="fr"><label>購買日期</label>
+        <input type="date" id="av-purchase" value="${today()}">
+      </div>
+      <div class="fr"><label>到期日</label>
+        <input type="date" id="av-expiry" value="${expDate}">
+      </div>
+    </div>
+    <div class="fr"><label>備註</label><input type="text" id="av-note" placeholder="備註"></div>
+    <button class="btn btn-pink" style="width:100%;margin-top:4px" onclick="createVoucherPack('${stId}')">確認新增</button>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+async function createVoucherPack(fixedStId) {
+  const stId    = fixedStId || document.getElementById('av-stu')?.value;
+  const qty     = parseInt(document.getElementById('av-qty')?.value) || 0;
+  const price   = parseFloat(document.getElementById('av-price')?.value) || 0;
+  const pDate   = document.getElementById('av-purchase')?.value || today();
+  const expiry  = document.getElementById('av-expiry')?.value || addWeeks(today(),52);
+  const note    = document.getElementById('av-note')?.value?.trim() || '';
+  if (!stId)  { alert('請選擇學員'); return; }
+  if (qty<=0) { alert('請填寫購買張數'); return; }
+  const pack = { id:'vp'+Date.now(), studentId:stId, quantity:qty, unitPrice:price,
+    purchaseDate:pDate, expiryDate:expiry, note, status:'active', createdAt:today() };
+  voucherPacks.push(pack);
+  await saveCol('voucherPacks', voucherPacks);
+  // If price set, auto-create fee record
+  if (price > 0) {
+    const st = getSt(stId);
+    const total = qty * price;
+    const fee = { id:'f'+Date.now(), studentId:stId, termId:null, sessionId:null,
+      amount:total, description:`多元券 ${qty}張 x NT$${price}`, dueDate:addWeeks(today(),2),
+      issuedDate:today(), type:'voucher', voucherPackId:pack.id };
+    fees.push(fee);
+    await saveCol('fees', fees);
+  }
+  closeMod();
+  renderVouchers();
+  hint(`✓ 已新增 ${qty} 張使用券`);
+}
+
+// ── 使用紀錄 ─────────────────────────────────────────────────────
+function openVoucherHistory(stId) {
+  const st = getSt(stId);
+  const history = voucherBookings.filter(b => b.studentId === stId)
+    .sort((a,b) => b.slotDate.localeCompare(a.slotDate));
+  document.getElementById('mod-title').textContent = st.name + ' — 使用券紀錄';
+  document.getElementById('mod-body').innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <div style="background:#F3F0FE;border-radius:8px;padding:8px 12px">
+        <div style="font-size:10px;color:#7F77DD">剩餘有效張數</div>
+        <div style="font-size:22px;font-weight:700;color:#4527A0">${getStudentValidRemaining(stId)}</div>
+      </div>
+      <div style="background:#f8f8f8;border-radius:8px;padding:8px 12px">
+        <div style="font-size:10px;color:#999">總購入</div>
+        <div style="font-size:18px;font-weight:600">${getStudentTotalVouchers(stId)}</div>
+      </div>
+      <div style="background:#f8f8f8;border-radius:8px;padding:8px 12px">
+        <div style="font-size:10px;color:#999">已出席扣抵</div>
+        <div style="font-size:18px;font-weight:600;color:#BA7517">${history.filter(b=>b.status==='attended').length}</div>
+      </div>
+    </div>
+    ${history.length ? `<div style="overflow-x:auto"><table class="tbl">
+      <thead><tr><th>日期</th><th>時段</th><th>教練</th><th>狀態</th><th>扣券</th></tr></thead>
+      <tbody>${history.map(b => {
+        const slot = multiSchedule.find(s=>s.id===b.slotId)||{};
+        const stCls = b.status==='attended'?'pill-green':b.status==='cancelled'?'pill-gray':'pill-amber';
+        const stLbl = b.status==='attended'?'已出席':b.status==='cancelled'?'已取消':'預約中';
+        return `<tr>
+          <td>${fmtD(b.slotDate)}</td>
+          <td>${slot.time||b.slotTime||'—'}</td>
+          <td>${slot.coach||b.coach||'—'}</td>
+          <td><span class="pill ${stCls}">${stLbl}</span></td>
+          <td style="text-align:center">${b.status==='attended'?'<span style="color:#A32D2D">-1 張</span>':'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>` : '<div class="empty">尚無使用紀錄</div>'}
+    <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="closeMod()">關閉</button>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+// ── 多元課表 ─────────────────────────────────────────────────────
+function renderMultiSchedule() {
+  const now   = new Date();
+  const mEl   = document.getElementById('multi-month-filter');
+  if (mEl && !mEl.value) {
+    mEl.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  }
+  const month = mEl ? mEl.value : '';
+  const list  = [...multiSchedule]
+    .filter(s => !month || s.date.startsWith(month))
+    .sort((a,b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  const el = document.getElementById('multi-schedule-list');
+  if (!el) return;
+  if (!list.length) { el.innerHTML = '<div class="empty">本月尚無多元課程時段</div>'; return; }
+  el.innerHTML = list.map(slot => {
+    const bookings  = voucherBookings.filter(b => b.slotId === slot.id && b.status !== 'cancelled');
+    const attended  = voucherBookings.filter(b => b.slotId === slot.id && b.status === 'attended');
+    const isPast    = slot.date < today();
+    const v         = slot.venueId ? getVenue(slot.venueId) : null;
+    return `<div class="card" style="border-left:3px solid ${isPast?'#ccc':'#7F77DD'}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${fmtD(slot.date)} ${slot.time}</div>
+          <div style="font-size:11px;color:#999">${slot.coach}${v?' · '+v.name:''} · 上限 ${slot.capacity} 人</div>
+        </div>
+        <span style="font-size:12px;font-weight:600;color:${bookings.length>=slot.capacity?'#A32D2D':'#7F77DD'}">${bookings.length}/${slot.capacity}</span>
+        ${isPast?'<span class="pill pill-gray">已結束</span>':'<span class="pill" style="background:#F3F0FE;color:#7F77DD">預約中</span>'}
+      </div>
+      <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px">
+        ${bookings.map(b => {
+          const st2 = getSt(b.studentId);
+          const remain = getStudentValidRemaining(b.studentId);
+          const stCls = b.status==='attended'?'background:#EAF3DE;color:#27500A':b.status==='absent'?'background:#FCEBEB;color:#501313':'background:#F3F0FE;color:#7F77DD';
+          return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;font-size:12px;${stCls}">
+            ${st2.name}
+            <span style="font-size:9px;opacity:.7">${b.status==='attended'?'✓出席':b.status==='absent'?'✕缺席':'剩'+remain+'張'}</span>
+          </span>`;
+        }).join('') || '<span style="font-size:11px;color:#aaa">尚無預約</span>'}
+      </div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        ${!isPast?`<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="openAddBookingToSlot('${slot.id}')">+ 加入學員</button>`:''}
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openSlotAttendance('${slot.id}')">📋 點名</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditMultiSlot('${slot.id}')">編輯</button>
+        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteMultiSlot('${slot.id}')">刪除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── 新增課表時段 ──────────────────────────────────────────────────
+function openAddMultiSlot() {
+  const coachOpts = coaches.filter(c=>c.active).map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
+  const venueOpts = venues.sort((a,b)=>(a.order||99)-(b.order||99)).map(v=>`<option value="${v.id}">${v.name}</option>`).join('');
+  document.getElementById('mod-title').textContent = '新增多元課程時段';
+  document.getElementById('mod-body').innerHTML = `
+    <div class="info-box" style="background:#F3F0FE;border-color:#C5BEEE;color:#4527A0">
+      可一次新增單一時段，或批量新增（選「重複排定」）。
+    </div>
+    <div class="fg">
+      <div class="fr"><label>日期 *</label><input type="date" id="ms-date" value="${today()}"></div>
+      <div class="fr"><label>時間 *</label><input type="text" id="ms-time" value="" placeholder="如：10:00-11:00"></div>
+    </div>
+    <div class="fg">
+      <div class="fr"><label>教練</label><select id="ms-coach">${coachOpts}</select></div>
+      <div class="fr"><label>場地</label><select id="ms-venue"><option value="">未指定</option>${venueOpts}</select></div>
+    </div>
+    <div class="fr"><label>人數上限</label><input type="number" id="ms-cap" value="8" min="1" max="50"></div>
+    <div class="fr"><label>備註</label><input type="text" id="ms-note" placeholder="如：滑板體驗、親子多元..."></div>
+    <div style="background:#f8f8f8;border-radius:8px;padding:8px 11px;margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;margin-bottom:4px">
+        <input type="checkbox" id="ms-repeat" onchange="toggleRepeat()" style="width:auto">
+        <span style="font-size:12px;font-weight:500">重複排定（每週固定）</span>
+      </label>
+      <div id="ms-repeat-opts" style="display:none">
+        <div class="fg">
+          <div class="fr"><label>重複到</label><input type="date" id="ms-repeat-end" value="${addWeeks(today(),8)}"></div>
+          <div class="fr"><label>排除日期（選填）</label><input type="text" id="ms-exclude" placeholder="逗號分隔 YYYY-MM-DD"></div>
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-pink" style="width:100%" onclick="createMultiSlot()">確認新增時段</button>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function toggleRepeat() {
+  const el = document.getElementById('ms-repeat-opts');
+  if (el) el.style.display = document.getElementById('ms-repeat')?.checked ? 'block' : 'none';
+}
+
+async function createMultiSlot() {
+  const date    = document.getElementById('ms-date')?.value;
+  const time    = document.getElementById('ms-time')?.value?.trim();
+  const coach   = document.getElementById('ms-coach')?.value;
+  const venueId = document.getElementById('ms-venue')?.value || null;
+  const cap     = parseInt(document.getElementById('ms-cap')?.value) || 8;
+  const note    = document.getElementById('ms-note')?.value?.trim() || '';
+  const repeat  = document.getElementById('ms-repeat')?.checked;
+  const repEnd  = document.getElementById('ms-repeat-end')?.value;
+  const exclude = (document.getElementById('ms-exclude')?.value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  if (!date || !time) { alert('請填寫日期與時間'); return; }
+
+  const slots = [];
+  if (repeat && repEnd && repEnd > date) {
+    // Generate weekly slots
+    let cur = new Date(date);
+    const end = new Date(repEnd);
+    while (cur <= end) {
+      const ds = cur.toISOString().slice(0,10);
+      if (!exclude.includes(ds)) {
+        slots.push({ id:'ms'+Date.now()+Math.random().toString(36).slice(2,5), date:ds, time, coach, venueId, capacity:cap, note, createdAt:today() });
+      }
+      cur.setDate(cur.getDate()+7);
+    }
+  } else {
+    slots.push({ id:'ms'+Date.now(), date, time, coach, venueId, capacity:cap, note, createdAt:today() });
+  }
+
+  multiSchedule.push(...slots);
+  await saveCol('multiSchedule', multiSchedule);
+  closeMod();
+  renderMultiSchedule();
+  hint(`✓ 已新增 ${slots.length} 個時段`);
+}
+
+function openEditMultiSlot(slotId) {
+  const slot = multiSchedule.find(s=>s.id===slotId); if (!slot) return;
+  const coachOpts = coaches.filter(c=>c.active).map(c=>`<option value="${c.name}" ${c.name===slot.coach?'selected':''}>${c.name}</option>`).join('');
+  const venueOpts = venues.sort((a,b)=>(a.order||99)-(b.order||99)).map(v=>`<option value="${v.id}" ${v.id===slot.venueId?'selected':''}>${v.name}</option>`).join('');
+  document.getElementById('mod-title').textContent = '編輯時段';
+  document.getElementById('mod-body').innerHTML = `
+    <div class="fg">
+      <div class="fr"><label>日期</label><input type="date" id="es-date" value="${slot.date}"></div>
+      <div class="fr"><label>時間</label><input type="text" id="es-time" value="${slot.time}"></div>
+    </div>
+    <div class="fg">
+      <div class="fr"><label>教練</label><select id="es-coach">${coachOpts}</select></div>
+      <div class="fr"><label>場地</label><select id="es-venue"><option value="">未指定</option>${venueOpts}</select></div>
+    </div>
+    <div class="fr"><label>人數上限</label><input type="number" id="es-cap" value="${slot.capacity||8}" min="1"></div>
+    <div class="fr"><label>備註</label><input type="text" id="es-note" value="${slot.note||''}"></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-pink" style="flex:1" onclick="saveMultiSlot('${slotId}')">儲存</button>
+      <button class="btn btn-red" onclick="deleteMultiSlot('${slotId}')">刪除</button>
+    </div>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+async function saveMultiSlot(slotId) {
+  const slot = multiSchedule.find(s=>s.id===slotId); if (!slot) return;
+  slot.date     = document.getElementById('es-date')?.value || slot.date;
+  slot.time     = document.getElementById('es-time')?.value?.trim() || slot.time;
+  slot.coach    = document.getElementById('es-coach')?.value || slot.coach;
+  slot.venueId  = document.getElementById('es-venue')?.value || null;
+  slot.capacity = parseInt(document.getElementById('es-cap')?.value) || slot.capacity;
+  slot.note     = document.getElementById('es-note')?.value?.trim() || '';
+  await saveCol('multiSchedule', multiSchedule);
+  closeMod(); renderMultiSchedule(); hint('已儲存 ✓');
+}
+
+async function deleteMultiSlot(slotId) {
+  if (!confirm('確認刪除此時段？已預約的學員也會取消。')) return;
+  multiSchedule = multiSchedule.filter(s=>s.id!==slotId);
+  voucherBookings = voucherBookings.map(b => b.slotId===slotId ? {...b,status:'cancelled'} : b);
+  await saveCol('multiSchedule', multiSchedule);
+  await saveCol('voucherBookings', voucherBookings);
+  closeMod(); renderMultiSchedule(); hint('已刪除 ✓');
+}
+
+// ── 加入學員（教練手動）─────────────────────────────────────────
+function openAddBookingToSlot(slotId) {
+  const slot = multiSchedule.find(s=>s.id===slotId); if (!slot) return;
+  const booked = voucherBookings.filter(b=>b.slotId===slotId&&b.status!=='cancelled').map(b=>b.studentId);
+  // Show students with valid vouchers
+  const eligible = students.filter(st => {
+    if (booked.includes(st.id)) return false;
+    return getStudentValidRemaining(st.id) > 0;
+  });
+  const noVoucher = students.filter(st => !booked.includes(st.id) && getStudentValidRemaining(st.id) === 0);
+
+  document.getElementById('mod-title').textContent = `加入學員 — ${fmtD(slot.date)} ${slot.time}`;
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#F3F0FE;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px;color:#4527A0">
+      已預約 ${booked.length} / ${slot.capacity} 人
+    </div>
+    <div class="fr"><label>選擇學員</label>
+      <select id="ab-stu">
+        <optgroup label="有效使用券 (${eligible.length}人)">
+          ${eligible.map(s=>`<option value="${s.id}">${s.name}（剩 ${getStudentValidRemaining(s.id)} 張）</option>`).join('') || '<option disabled>無</option>'}
+        </optgroup>
+        <optgroup label="無使用券 (${noVoucher.length}人)">
+          ${noVoucher.map(s=>`<option value="${s.id}" style="color:#aaa">${s.name}（需先購券）</option>`).join('')}
+        </optgroup>
+      </select>
+    </div>
+    <div class="fr"><label>備註</label><input type="text" id="ab-note" placeholder="選填"></div>
+    <button class="btn btn-pink" style="width:100%" onclick="createBooking('${slotId}')">確認加入（預約時不扣券，出席後才扣）</button>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function openManualBooking(stId) {
+  const st = getSt(stId);
+  const remaining = getStudentValidRemaining(stId);
+  const upcoming  = [...multiSchedule]
+    .filter(s => s.date >= today())
+    .sort((a,b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  const alreadyBooked = new Set(voucherBookings.filter(b=>b.studentId===stId&&b.status!=='cancelled').map(b=>b.slotId));
+
+  document.getElementById('mod-title').textContent = st.name + ' — 預約時段';
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#F3F0FE;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px;color:#4527A0">
+      剩餘有效券：<strong>${remaining} 張</strong>（出席後才扣券）
+    </div>
+    ${remaining === 0 ? '<div style="color:#A32D2D;font-size:12px;margin-bottom:8px;padding:6px 10px;background:#FCEBEB;border-radius:6px">⚠ 此學員無有效使用券，請先增購使用券。</div>' : ''}
+    <div class="fr"><label>選擇時段</label>
+      <select id="mb-slot">
+        ${upcoming.filter(s=>!alreadyBooked.has(s.id)).map(s=>{
+          const cnt = voucherBookings.filter(b=>b.slotId===s.id&&b.status!=='cancelled').length;
+          const full = cnt >= s.capacity;
+          return `<option value="${s.id}" ${full?'disabled':''}>
+            ${fmtD(s.date)} ${s.time} — ${s.coach}（${cnt}/${s.capacity}${full?' 已滿':''}）
+          </option>`;
+        }).join('') || '<option disabled>目前無可預約時段</option>'}
+      </select>
+    </div>
+    <div class="fr"><label>備註</label><input type="text" id="mb-note" placeholder="選填"></div>
+    <button class="btn btn-pink" style="width:100%" onclick="createBookingForStudent('${stId}')">確認預約</button>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+async function createBooking(slotId) {
+  const stId = document.getElementById('ab-stu')?.value;
+  const note = document.getElementById('ab-note')?.value?.trim() || '';
+  if (!stId) { alert('請選擇學員'); return; }
+  const slot = multiSchedule.find(s=>s.id===slotId);
+  const dup  = voucherBookings.find(b=>b.slotId===slotId&&b.studentId===stId&&b.status!=='cancelled');
+  if (dup) { alert('此學員已預約此時段'); return; }
+  voucherBookings.push({ id:'vb'+Date.now(), slotId, studentId:stId, slotDate:slot.date, slotTime:slot.time, coach:slot.coach, status:'booked', source:'coach', note, createdAt:today() });
+  await saveCol('voucherBookings', voucherBookings);
+  closeMod(); renderMultiSchedule(); renderVouchers();
+  hint('預約已建立（出席後才扣券）✓');
+}
+
+async function createBookingForStudent(stId) {
+  const slotId = document.getElementById('mb-slot')?.value;
+  const note   = document.getElementById('mb-note')?.value?.trim() || '';
+  if (!slotId) { alert('請選擇時段'); return; }
+  const slot = multiSchedule.find(s=>s.id===slotId);
+  const dup  = voucherBookings.find(b=>b.slotId===slotId&&b.studentId===stId&&b.status!=='cancelled');
+  if (dup) { alert('此學員已預約此時段'); return; }
+  voucherBookings.push({ id:'vb'+Date.now(), slotId, studentId:stId, slotDate:slot.date, slotTime:slot.time, coach:slot.coach, status:'booked', source:'coach', note, createdAt:today() });
+  await saveCol('voucherBookings', voucherBookings);
+  closeMod(); renderVouchers();
+  hint('預約已建立 ✓');
+}
+
+// ── 多元點名 ──────────────────────────────────────────────────────
+function openSlotAttendance(slotId) {
+  const slot = multiSchedule.find(s=>s.id===slotId); if (!slot) return;
+  const bookings = voucherBookings.filter(b=>b.slotId===slotId&&b.status!=='cancelled');
+  document.getElementById('mod-title').textContent = `點名 — ${fmtD(slot.date)} ${slot.time}`;
+  renderSlotAttBody(slotId, bookings);
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+function renderSlotAttBody(slotId, bookings) {
+  const slot = multiSchedule.find(s=>s.id===slotId);
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#F3F0FE;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px">
+      <div style="font-weight:500;color:#4527A0">${fmtD(slot.date)} ${slot.time} · ${slot.coach}</div>
+      <div style="color:#7F77DD;margin-top:2px">出席後自動扣抵一張使用券</div>
+    </div>
+    ${bookings.length ? bookings.map(b => {
+      const st = getSt(b.studentId);
+      const remain = getStudentValidRemaining(b.studentId);
+      const expiring = voucherPacks.filter(v=>v.studentId===b.studentId&&isVoucherValid(v)).some(v=>v.expiryDate<=addWeeks(today(),4));
+      return `<div class="srow ${b.status==='attended'?'present':b.status==='absent'?'absent':''}" style="flex-wrap:wrap">
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:500">${st.name}
+            <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#F3F0FE;color:#7F77DD;margin-left:4px">多元券</span>
+            ${remain<=3&&remain>0?`<span style="font-size:9px;color:#BA7517">剩${remain}張</span>`:''}
+            ${expiring?'<span style="font-size:9px;color:#A32D2D">快到期</span>':''}
+          </div>
+          <div style="font-size:10px;color:#999">剩餘有效券：${remain} 張</div>
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="sb ${b.status==='attended'?'sp':''}" onclick="setSlotAtt('${slotId}','${b.id}','attended')">✓ 出席</button>
+          <button class="sb ${b.status==='absent'?'sa':''}" onclick="setSlotAtt('${slotId}','${b.id}','absent')">✕ 缺席</button>
+          <button class="sb ${b.status==='cancelled'?'':''}" onclick="setSlotAtt('${slotId}','${b.id}','cancelled')" style="color:#999">取消</button>
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty">此時段尚無預約學員</div>'}
+    <div style="margin-top:10px;display:flex;gap:6px">
+      <button class="btn btn-pink" style="flex:1" onclick="openAddBookingToSlot('${slotId}');renderSlotAttBody('${slotId}',voucherBookings.filter(b=>b.slotId==='${slotId}'&&b.status!=='cancelled'))">+ 加入學員</button>
+      <button class="btn btn-outline" onclick="closeMod()">關閉</button>
+    </div>`;
+}
+
+async function setSlotAtt(slotId, bookingId, status) {
+  const b = voucherBookings.find(x=>x.id===bookingId); if (!b) return;
+  const prev = b.status;
+  b.status = status;
+  // Deduct voucher when marked attended (only if wasn't already attended)
+  if (status === 'attended' && prev !== 'attended') {
+    hint(`✓ ${getSt(b.studentId).name} 出席，已扣抵 1 張使用券`);
+  }
+  // If un-attending (from attended to something else), restore the voucher
+  await saveCol('voucherBookings', voucherBookings);
+  renderSlotAttBody(slotId, voucherBookings.filter(bk=>bk.slotId===slotId&&bk.status!=='cancelled'));
+  renderVouchers();
+}
+
+// ── 預約總覽頁 ────────────────────────────────────────────────────
+function renderMultiBookings() {
+  const el = document.getElementById('multi-bookings-list');
+  if (!el) return;
+  const upcoming = voucherBookings.filter(b=>b.slotDate>=today()&&b.status==='booked')
+    .sort((a,b)=>a.slotDate.localeCompare(b.slotDate));
+  const past = voucherBookings.filter(b=>b.slotDate<today()||b.status==='attended'||b.status==='absent')
+    .sort((a,b)=>b.slotDate.localeCompare(a.slotDate))
+    .slice(0,30);
+
+  el.innerHTML = `
+    <div style="font-size:13px;font-weight:500;margin-bottom:8px;color:#7F77DD">📅 即將到來（${upcoming.length}筆）</div>
+    ${upcoming.length ? upcoming.map(b=>{
+      const st=getSt(b.studentId); const slot=multiSchedule.find(s=>s.id===b.slotId)||{};
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid #e0e0e0">
+        <div class="av av-pink" style="width:28px;height:28px;font-size:11px">${st.name[0]}</div>
+        <div style="flex:1"><div style="font-size:12px;font-weight:500">${st.name}</div>
+        <div style="font-size:11px;color:#999">${fmtD(b.slotDate)} ${b.slotTime} · ${b.coach||slot.coach||'—'}</div></div>
+        <button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="cancelBooking('${b.id}')">取消</button>
+      </div>`;
+    }).join('') : '<div style="color:#aaa;font-size:12px;padding:8px 0">目前無即將到來的預約</div>'}
+
+    <div style="font-size:13px;font-weight:500;margin:16px 0 8px;color:#888">🕐 歷史紀錄（最近30筆）</div>
+    ${past.length ? past.map(b=>{
+      const st=getSt(b.studentId);
+      const cls = b.status==='attended'?'pill-green':b.status==='absent'?'pill-red':'pill-gray';
+      const lbl = b.status==='attended'?'已出席':b.status==='absent'?'缺席':'已取消';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid #e0e0e0">
+        <div style="flex:1;font-size:12px"><span style="font-weight:500">${st.name}</span>
+        <span style="color:#999"> · ${fmtD(b.slotDate)} ${b.slotTime}</span></div>
+        <span class="pill ${cls}" style="font-size:10px">${lbl}</span>
+        ${b.status==='attended'?'<span style="font-size:10px;color:#7F77DD">-1券</span>':''}
+      </div>`;
+    }).join('') : '<div style="color:#aaa;font-size:12px;padding:8px 0">無歷史紀錄</div>'}`;
+}
+
+async function cancelBooking(bookingId) {
+  if (!confirm('確認取消此預約？')) return;
+  const b = voucherBookings.find(x=>x.id===bookingId); if (!b) return;
+  b.status = 'cancelled';
+  await saveCol('voucherBookings', voucherBookings);
+  renderMultiBookings(); hint('預約已取消 ✓');
+}
+
+
 async function initApp() {
   showLoading('載入資料…');
   try {
@@ -3185,6 +3880,7 @@ async function initApp() {
     pendingSubs = await fsGet('pending');
     coaches     = await fsGet('coaches');
     subLog      = await fsGet('sublog');
+    await loadMultiData();
     const srSnap = await db.collection('signin').get();
     signinRec = {};
     srSnap.docs.forEach(d => { signinRec[d.id] = d.data(); });
@@ -4075,8 +4771,8 @@ function showSessAttInModal(sessId, termId) {
   const holidays  = t ? (t.holidays||[]).map(h=>h.date) : [];
   const sessDates = t ? (t.sessionDates||{}) : {};
   const sd     = sessDates[sessId] || {};
-  const startD = new Date(sd.start||(t?t.startDate:''));
-  const endD   = new Date(sd.end||(t?t.endDate:''));
+  const startD = new Date(s.startDate || sd.start||(t?t.startDate:''));
+  const endD   = new Date(s.endDate || sd.end||(t?t.endDate:''));
 
   // Generate lesson dates
   const dayMap = {週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:0};
