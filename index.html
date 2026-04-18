@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v5.8</title>
+<title>哈樂維 v6.1</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -220,7 +220,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.9</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.1</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -743,7 +743,26 @@ function renderDash(){
 }
 
 
-function renderVenues(){document.getElementById('venues-body').innerHTML=venues.map(v=>{const vS=sessions.filter(s=>s.venueId===v.id);return`<div class="card" style="border-left:3px solid ${v.color}"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:30px;height:30px;border-radius:8px;background:${v.color}20;display:flex;align-items:center;justify-content:center;font-size:15px">${v.icon||'📍'}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${v.name}</div><div style="font-size:11px;color:#999">滿班${v.capacity}人 · ${vS.length}班次 · ${v.description||''}</div></div><span class="pill ${v.status==='active'?'pill-green':'pill-gray'}">${v.status==='active'?'使用中':'停用'}</span></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditVenue('${v.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteVenue('${v.id}')">刪除</button></div></div>`;}).join('')||'<div class="empty">尚無場地</div>';}
+async function moveVenue(id, dir) {
+  const sorted = [...venues].sort((a,b)=>(a.order||999)-(b.order||999));
+  const idx = sorted.findIndex(v=>v.id===id);
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= sorted.length) return;
+  const a = sorted[idx], b = sorted[swapIdx];
+  const tmpOrder = a.order != null ? a.order : idx+1;
+  a.order = b.order != null ? b.order : swapIdx+1;
+  b.order = tmpOrder;
+  const ai = venues.findIndex(v=>v.id===a.id);
+  const bi = venues.findIndex(v=>v.id===b.id);
+  if(ai>=0) venues[ai].order = a.order;
+  if(bi>=0) venues[bi].order = b.order;
+  await saveCol('venues', venues);
+  renderVenues(); renderDash();
+  hint('' + '...' + ' 場地順序已更新');
+}
+
+
+function renderVenues(){document.getElementById('venues-body').innerHTML=venues.map(v=>{const vS=sessions.filter(s=>s.venueId===v.id);return`<div class="card" style="border-left:3px solid ${v.color}"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:30px;height:30px;border-radius:8px;background:${v.color}20;display:flex;align-items:center;justify-content:center;font-size:15px">${v.icon||'📍'}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${v.name}</div><div style="font-size:11px;color:#999">滿班${v.capacity}人 · ${vS.length}班次 · ${v.description||''}</div></div><span class="pill ${v.status==='active'?'pill-green':'pill-gray'}">${v.status==='active'?'使用中':'停用'}</span></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="moveVenue('${v.id}',-1)" title="up">&#8593;</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="moveVenue('${v.id}',1)" title="down">&#8595;</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditVenue('${v.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteVenue('${v.id}')">刪除</button></div></div>`;}).join('')||'<div class="empty">尚無場地</div>';}
 function openAddVenue(){renderVenueForm(null,{name:'',shortName:'',type:'classroom',color:VENUE_COLORS[venues.length%VENUE_COLORS.length],icon:'📍',capacity:15,description:'',status:'active'});}
 function openEditVenue(id){const v=getVenue(id);if(v)renderVenueForm(id,v);}
 function renderVenueForm(editId,d){document.getElementById('mod-title').textContent=editId?'編輯場地':'新增場地';const sw=VENUE_COLORS.map(c=>`<span style="width:20px;height:20px;border-radius:50%;border:2px solid ${d.color===c?'#333':'transparent'};cursor:pointer;display:inline-block;vertical-align:middle;background:${c};margin-right:4px" onclick="document.getElementById('vf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');document.getElementById('mod-body').innerHTML=`<div class="fg"><div class="fr"><label>場地名稱 *</label><input type="text" id="vf-name" value="${d.name||''}"></div><div class="fr"><label>簡稱</label><input type="text" id="vf-short" value="${d.shortName||''}"></div></div><div class="fg"><div class="fr"><label>場地類型</label><select id="vf-type"><option value="track" ${d.type==='track'?'selected':''}>賽道</option><option value="classroom" ${d.type==='classroom'?'selected':''}>教室</option><option value="art" ${d.type==='art'?'selected':''}>藝術空間</option><option value="other" ${d.type==='other'?'selected':''}>其他</option></select></div><div class="fr"><label>滿班人數</label><input type="number" id="vf-cap" value="${d.capacity||15}" min="1"></div></div><div class="fr"><label>顏色</label><input type="hidden" id="vf-color" value="${d.color}"><div style="margin-top:4px">${sw}</div></div><div class="fr"><label>圖示</label><input type="text" id="vf-icon" value="${d.icon||'📍'}" style="width:60px;font-size:18px;text-align:center"></div><div class="fr"><label>說明</label><input type="text" id="vf-desc" value="${d.description||''}"></div><div class="fr"><label>狀態</label><select id="vf-status"><option value="active" ${d.status==='active'?'selected':''}>使用中</option><option value="inactive" ${d.status==='inactive'?'selected':''}>停用</option></select></div><div style="display:flex;gap:6px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveVenue('${editId}')`:'createVenue()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteVenue('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
@@ -938,6 +957,18 @@ function renderMakeup() {
       '</div>' +
     '</div>';
   }).join('');
+  // Append no-bill section if any
+  if(noBillRows.length) {
+    body.innerHTML += '<div style="margin-top:16px;font-size:12px;font-weight:500;color:#BA7517;margin-bottom:8px;padding:7px 10px;background:#FAEEDA;border-radius:8px">⚠ 尚未開立帳單（'+noBillRows.length+'人）</div>' +
+      noBillRows.map(r=>'<div class="card" style="border-left:3px solid #BA7517;opacity:.85">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<div class="av av-pink">'+r.name[0]+'</div>'+
+          '<div style="flex:1"><div style="font-size:13px;font-weight:500">'+r.name+'</div>'+
+          '<div style="font-size:11px;color:#999">'+r.sessName+' · '+r.termName+'</div></div>'+
+          (r.price!=null?'<span class="fee-tag">'+fmt(r.price)+'</span>':'')+
+          '<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm(&quot;'+r.termId+'&quot;,&quot;'+r.studentId+'&quot;,&quot;'+r.sessId+'&quot;)">開帳單</button>'+
+        '</div></div>').join('');
+  }
 }
 
 async function markMakeupDone(mkId) {
@@ -968,7 +999,7 @@ async function deleteMakeup(mkId) {
 function renderFee(){
   const tF = document.getElementById('fee-term-filter').value;
   const sF = document.getElementById('fee-status-filter').value;
-  let list = [...fees];
+  let list = [...fees].sort((a,b)=>(b.issuedDate||b.id||'').localeCompare(a.issuedDate||a.id||''));
   if(tF !== 'all') list = list.filter(f => f.termId === tF);
   // Apply quick date filter (by issuedDate)
   const qFrom = document.getElementById('fee-quick-from')?.value || '';
@@ -1006,7 +1037,7 @@ function renderFee(){
   renderBills(list);
 }
 
-function renderBills(list){
+function renderBills(list, noBillRows=[]){
   const body = document.getElementById('fee-body');
   if(!body) return;
   if(!list || !list.length){ body.innerHTML = '<div class="empty">沒有符合條件的帳單</div>'; return; }
@@ -1342,7 +1373,13 @@ async function delStu(id){if(!confirm('確認刪除此學生？'))return;student
 function openIssueFeeForStudent(stId) {
   const st = getSt(stId);
   // Get all active enrollments for this student
-  const stEnrolls = enrolls.filter(e => e.studentId === stId && e.status === 'enrolled');
+  let stEnrolls = enrolls.filter(e => e.studentId === stId && e.status === 'enrolled');
+
+  // Fallback: if no enrolls record but student has sessionId (saved in student form)
+  if (!stEnrolls.length && st.sessionId) {
+    const termId = st.termId || (terms.find(t=>termStatus(t).key==='active')?.id) || '';
+    stEnrolls = [{studentId:stId, sessionId:st.sessionId, termId, status:'enrolled'}];
+  }
 
   if (!stEnrolls.length) {
     // No enrollments, open blank fee form
@@ -2913,6 +2950,41 @@ function calcReportFee() {
       <tr style="font-weight:600;background:#f0f0f0"><td colspan="4">合計 ${list.length} 筆</td><td style="text-align:right">${fmt(totalAmt)}</td><td style="text-align:right;color:#27500A">${fmt(totalPaid)}</td><td style="text-align:right;color:#A32D2D">${fmt(totalUnpaid)}</td><td></td></tr>
       </tbody>
     </table></div>`;
+
+  // Append no-bill students section
+  const fFrom2=document.getElementById('fr-from')?.value||'';
+  const fTo2  =document.getElementById('fr-to')?.value||'';
+  const fTerm2=document.getElementById('fr-term')?.value||'';
+  const billedKeys2=new Set(fees.map(f=>f.studentId+':'+f.termId));
+  const noBill2=[];
+  enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
+    const t2=terms.find(x=>x.id===e.termId);
+    if(fTerm2&&e.termId!==fTerm2)return;
+    if(fFrom2&&t2&&t2.endDate<fFrom2)return;
+    if(fTo2&&t2&&t2.startDate>fTo2)return;
+    const key2=e.studentId+':'+e.termId;
+    if(!billedKeys2.has(key2)&&!noBill2.find(r=>r.key===key2)){
+      const st2=getSt(e.studentId);const s2=getSess(e.sessionId);const pr2=s2?getSessPrice(s2.id):null;
+      noBill2.push({key:key2,name:st2.name,termName:t2?t2.name:'—',sessName:s2?s2.name+' '+s2.day+' '+s2.time:'—',price:pr2,studentId:e.studentId,termId:e.termId,sessId:e.sessionId});
+    }
+  });
+  if(noBill2.length){
+    document.getElementById('fr-result').innerHTML+=`
+      <div style="margin-top:16px;font-size:13px;font-weight:500;color:#BA7517;margin-bottom:8px;padding:8px 12px;background:#FAEEDA;border-radius:8px">
+        ⚠ 尚未開立帳單（${noBill2.length} 人）
+      </div>
+      <div style="overflow-x:auto"><table class="report-table">
+        <thead><tr><th>學生</th><th>期別</th><th>課程</th><th>應收學費</th><th></th></tr></thead>
+        <tbody>${noBill2.map(r=>`<tr>
+          <td style="font-weight:500">${r.name}</td>
+          <td>${r.termName}</td>
+          <td>${r.sessName}</td>
+          <td style="text-align:right;color:#BA7517">${r.price!=null?fmt(r.price):'未設費率'}</td>
+          <td><button class="btn btn-pink" style="font-size:11px;padding:2px 8px" onclick="renderFeeForm('${r.termId}','${r.studentId}','${r.sessId}')">開帳單</button></td>
+        </tr>`).join('')}</tbody>
+        <tr style="font-weight:600;background:#FAEEDA"><td colspan="3">尚未開帳合計</td><td style="text-align:right;color:#BA7517">${fmt(noBill2.reduce((a,r)=>a+(r.price||0),0))}</td><td></td></tr>
+      </table></div>`;
+  }
 }
 
 // ── Fee panel: add date-range filter ──────────────
@@ -3099,6 +3171,9 @@ async function initApp() {
   showLoading('載入資料…');
   try {
     venues      = await fsGet('venues');
+    let vNeedsSave=false;
+    venues.forEach((v,i)=>{if(v.order==null){v.order=i+1;vNeedsSave=true;}});
+    if(vNeedsSave) await saveCol('venues',venues);
     sessions    = await fsGet('sessions');
     terms       = await fsGet('terms');
     enrolls     = await fsGet('enrolls');
