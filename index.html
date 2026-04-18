@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v5.6</title>
+<title>哈樂維 v5.8</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -220,7 +220,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.6</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.9</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -348,7 +348,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
         <select id="stu-fee-filter" onchange="renderStudents()" style="font-size:12px;width:auto">
           <option value="all">全部列表</option>
           <option value="cleared">學費結清</option>
-          <option value="no-bill">尚未開帳</option>
+          <option value="no-bill" selected>尚未開帳</option>
           <option value="unpaid">待付學費</option>
         </select>
         <input type="text" id="stu-search" placeholder="搜尋…" style="width:130px;font-size:12px" oninput="renderStudents()">
@@ -757,7 +757,8 @@ function renderSessions(){
   const vOpts=['all',...venues.map(v=>v.id)];
   document.getElementById('track-tabs').innerHTML=vOpts.map(id=>`<button class="chip ${sessVenueFilter===id?'on':''}" onclick="sessVenueFilter='${id}';renderSessions()">${id==='all'?'全部場地':(getVenue(id)?.shortName||id)}</button>`).join('');
   let list=[...sessions];if(sessVenueFilter!=='all')list=list.filter(s=>s.venueId===sessVenueFilter);
-  list.sort((a,b)=>{const va=getVenue(a.venueId),vb=getVenue(b.venueId);if((va?.name||'')!==(vb?.name||''))return(va?.name||'').localeCompare(vb?.name||'');return(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9);});
+  // Sort: newest first (by id = creation time), then by venue+day
+  list.sort((a,b)=>b.id.localeCompare(a.id));
   document.getElementById('sess-grid').innerHTML=list.length?list.map(s=>{const v=getVenue(s.venueId);const totalE=sessEnrolledTotal(s.id);const pct=Math.min(100,Math.round(totalE/s.capacity*100));const pr=getSessPrice(s.id);return`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:6px${v?`;border-top:2px solid ${v.color}`:''}"><div style="display:flex;align-items:center;gap:6px"><span class="badge ${s.type}">${tLabel(s.type)}</span><div style="font-size:13px;font-weight:500;flex:1">${s.name}</div>${v?`<span style="font-size:9px;padding:1px 5px;border-radius:4px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}</div><div style="font-size:11px;color:#999"><div style="display:flex;gap:10px;margin-bottom:2px;flex-wrap:wrap"><span>${s.day} ${s.time}</span><span style="color:#27500A;font-weight:500">${s.periodLessons} 堂/期</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div><div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">${(()=>{const co=coaches.find(c=>c.name===s.coach)||{};return`<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:18px;height:18px;border-radius:50%;background:${co.color||'#aaa'}30;color:${co.color||'#666'};font-size:9px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${(s.coach||'?')[0]}</span><span style="font-size:11px;color:#555;font-weight:500">${s.coach||'未指定'}</span></span>`;})()}</div><div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px"><span style="font-size:10px">報名</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div></div></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div></div>`;}).join(''):'<div class="empty" style="grid-column:1/-1">沒有課程</div>';}
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
@@ -1202,19 +1203,32 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
     const stFees = fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');
     const stEnrolls = enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');
     if(feeF==='no-bill') {
-      // Has enrollment but no fee record for that term
       return stEnrolls.some(e=>!fees.find(f=>f.studentId===st.id&&f.termId===e.termId));
     }
     if(feeF==='cleared') {
-      // Has fees and all are paid (bal <= 0)
       return stFees.length>0 && stFees.every(f=>feeStatus(f).bal<=0);
     }
     if(feeF==='unpaid') {
-      // Has at least one fee with remaining balance
       return stFees.some(f=>feeStatus(f).bal>0);
     }
     return true;
-  });if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${(()=>{
+  });
+  // Sort newest first (by startDate or id)
+  list.sort((a,b)=>{
+    const da=a.startDate||a.id||'';
+    const db2=b.startDate||b.id||'';
+    return db2.localeCompare(da);
+  });
+
+  // Smart fallback: if no-bill is empty, switch to unpaid
+  if(feeF==='no-bill' && !list.length) {
+    const sel=document.getElementById('stu-fee-filter');
+    if(sel){ sel.value='unpaid'; }
+    list=students.filter(st=>{
+      if(q && !st.name.toLowerCase().includes(q) && !(st.parent||'').toLowerCase().includes(q)) return false;
+      return fees.filter(f=>f.studentId===st.id&&f.status!=='refunded').some(f=>feeStatus(f).bal>0);
+    });
+  }if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${(()=>{
           // Per-term status summary
           const termGroups=[...new Set(stE.map(e=>e.termId))];
           if(termGroups.length<=1){
@@ -2694,10 +2708,15 @@ function buildFilterHTML(id, extras='') {
   const coachOpts = ['<option value="">全部教練</option>',...coaches.filter(c=>c.active).map(c=>`<option value="${c.name}">${c.name}</option>`)].join('');
   const sessOpts  = ['<option value="">全部課程</option>',...sessions.sort((a,b)=>a.name.localeCompare(b.name)).map(s=>`<option value="${s.id}">${s.name} · ${s.day} ${s.time}</option>`)].join('');
   const termOpts  = ['<option value="">全部期別</option>',...terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}">${t.name}</option>`)].join('');
-  const yr=new Date().getFullYear();
+  const now=new Date();
+  const yr=now.getFullYear();
+  const mo=String(now.getMonth()+1).padStart(2,'0');
+  const lastDay=new Date(yr,now.getMonth()+1,0).getDate();
+  const mFrom=yr+'-'+mo+'-01';
+  const mTo=yr+'-'+mo+'-'+String(lastDay).padStart(2,'0');
   return `<div class="report-filter">
-    <div class="fr"><label>開始日期</label><input type="date" id="${id}-from" value="${yr}-01-01"></div>
-    <div class="fr"><label>結束日期</label><input type="date" id="${id}-to" value="${yr}-12-31"></div>
+    <div class="fr"><label>開始日期</label><input type="date" id="${id}-from" value="${mFrom}"></div>
+    <div class="fr"><label>結束日期</label><input type="date" id="${id}-to" value="${mTo}"></div>
     <div class="fr"><label>教練</label><select id="${id}-coach">${coachOpts}</select></div>
     <div class="fr"><label>課程</label><select id="${id}-sess">${sessOpts}</select></div>
     ${extras}
@@ -2830,8 +2849,8 @@ function renderReportFeeRange(body) {
   const termOpts=['<option value="">全部期別</option>',...terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}">${t.name}</option>`)].join('');
   const statusOpts=`<select id="fr-status"><option value="">全部狀態</option><option value="paid">已繳清</option><option value="unpaid">未繳清</option><option value="overdue">逾期</option><option value="refunded">已退費</option></select>`;
   body.innerHTML = `<div class="report-filter">
-    <div class="fr"><label>開帳日期（起）</label><input type="date" id="fr-from" value="${new Date().getFullYear()}-01-01"></div>
-    <div class="fr"><label>開帳日期（迄）</label><input type="date" id="fr-to" value="${new Date().getFullYear()}-12-31"></div>
+    <div class="fr"><label>開帳日期（起）</label><input type="date" id="fr-from" value="${new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0')+'-01'}"></div>
+    <div class="fr"><label>開帳日期（迄）</label><input type="date" id="fr-to" value="${(()=>{const n=new Date();const ld=new Date(n.getFullYear(),n.getMonth()+1,0).getDate();return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(ld).padStart(2,'0');})()}"></div>
     <div class="fr"><label>期別</label><select id="fr-term">${termOpts}</select></div>
     <div class="fr"><label>狀態</label>${statusOpts}</div>
     <button class="btn btn-blue" onclick="calcReportFee()" style="align-self:flex-end">查詢</button>
@@ -3330,7 +3349,7 @@ function calcReportAtt() {
   const coachF=document.getElementById('att-coach')?.value||'';
   const sessF =document.getElementById('att-sess')?.value||'';
 
-  // Build rows: each signinRec entry → effective coach
+  // Scan signinRec for attendance
   const rows=[];
   Object.entries(signinRec).forEach(([key,rec])=>{
     const[sessId,date]=key.split('|');if(!date)return;
@@ -3348,7 +3367,7 @@ function calcReportAtt() {
     rows.push({coach:eff,origCoach:s.coach,isSub,subFee,isExt,sessId,sessName:s.name+' '+s.day+' '+s.time,date,present,leave});
   });
 
-  // Group by effectiveCoach
+  // Group by coach
   const byCoach={};
   rows.forEach(r=>{
     if(!byCoach[r.coach])byCoach[r.coach]={coach:r.coach,sessions:{},totalPresent:0,totalLeave:0,subSessions:[],totalSubFee:0};
@@ -3360,13 +3379,34 @@ function calcReportAtt() {
     if(r.isSub){ss.subDates.push(r.date);ss.subFeeTotal+=r.subFee*r.present;g.totalSubFee+=r.subFee*r.present;g.subSessions.push({date:r.date,sessName:r.sessName,present:r.present,subFee:r.subFee,isExt:r.isExt,origCoach:r.origCoach});}
   });
 
+  // Add makeup attendance (students who did makeup and were marked present)
+  makeupRec.filter(m=>m.makeupDate&&m.makeupSessionId).forEach(m=>{
+    if(from&&m.makeupDate<from)return;
+    if(to&&m.makeupDate>to)return;
+    const s=getSess(m.makeupSessionId);if(!s)return;
+    const eff=s.coach;
+    if(coachF&&eff!==coachF)return;
+    if(sessF&&m.makeupSessionId!==sessF)return;
+    const mkKey=m.makeupSessionId+'|'+m.makeupDate;
+    const mkRec=signinRec[mkKey]||{};
+    if(mkRec[m.studentId]!=='present')return;
+    // Only add if this session+date wasn't already counted (makeups show in signinRec)
+    // We track makeup presence via signinRec, so it's already included above
+    // Just tag the makeup contribution for the note
+    if(byCoach[eff]&&byCoach[eff].sessions[m.makeupSessionId]){
+      if(!byCoach[eff].sessions[m.makeupSessionId].makeupCount)
+        byCoach[eff].sessions[m.makeupSessionId].makeupCount=0;
+      byCoach[eff].sessions[m.makeupSessionId].makeupCount++;
+    }
+  });
+
   const totalPresent=Object.values(byCoach).reduce((a,b)=>a+b.totalPresent,0);
   const totalLeave  =Object.values(byCoach).reduce((a,b)=>a+b.totalLeave,0);
   const totalSubFee =Object.values(byCoach).reduce((a,b)=>a+b.totalSubFee,0);
 
   if(!Object.keys(byCoach).length){document.getElementById('att-result').innerHTML='<div class="empty">此區間無出席簽到資料</div>';return;}
 
-  // Stats
+  // Stats (總計只含出席，不含請假)
   const statsHTML=`<div class="report-stat-grid">
     <div class="report-stat"><div class="report-stat-val" style="color:#27500A">${totalPresent}</div><div class="report-stat-lbl">總出席人次</div></div>
     <div class="report-stat"><div class="report-stat-val" style="color:#378ADD">${totalLeave}</div><div class="report-stat-lbl">總請假人次</div></div>
@@ -3374,58 +3414,69 @@ function calcReportAtt() {
     <div class="report-stat"><div class="report-stat-val" style="color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'NT$0'}</div><div class="report-stat-lbl">代課費合計</div></div>
   </div>`;
 
-  // Main table
+  // Main table: each coach has session rows + a coach total row
   const mainRows=Object.values(byCoach).flatMap(g=>{
     const co=coaches.find(c=>c.name===g.coach)||{color:'#888'};
     const sl=Object.values(g.sessions);
-    return sl.map((ss,i)=>{
-      const subNote=ss.subDates.length?`<span style="font-size:10px;color:#BA7517;background:#FAEEDA;padding:1px 5px;border-radius:5px;margin-left:4px">代課 ${ss.subDates.length} 堂</span>`:'';
+    const coachDot=`<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${co.color||'#888'};margin-right:4px;vertical-align:middle"></span>`;
+    const sessRows=sl.map((ss,i)=>{
+      const subNote=ss.subDates.length?`<span style="font-size:10px;color:#BA7517;background:#FAEEDA;padding:1px 5px;border-radius:5px;margin-left:3px">代課${ss.subDates.length}堂</span>`:'';
+      const mkNote=ss.makeupCount?`<span style="font-size:10px;color:#7F77DD;background:#F3F0FE;padding:1px 5px;border-radius:5px;margin-left:3px">含補課${ss.makeupCount}</span>`:'';
       return`<tr>
-        ${i===0?`<td rowspan="${sl.length}" style="font-weight:500;vertical-align:middle;white-space:nowrap">
-          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${co.color||'#888'};margin-right:4px"></span>${g.coach}
-          ${g.subSessions.length?`<div style="font-size:10px;color:#BA7517">本期代課${g.subSessions.length}場</div>`:''}
+        ${i===0?`<td rowspan="${sl.length+1}" style="font-weight:600;vertical-align:top;white-space:nowrap;padding:8px 10px;background:#fafafa;border-right:2px solid ${co.color||'#888'}">
+          ${coachDot}${g.coach}
+          ${g.subSessions.length?`<div style="font-size:10px;color:#BA7517;margin-top:2px">代課${g.subSessions.length}場</div>`:''}
         </td>`:''}
-        <td>${ss.name}${subNote}</td>
+        <td>${ss.name}${subNote}${mkNote}</td>
         <td style="text-align:center">${ss.classDates.length}</td>
         <td style="text-align:center;font-weight:500;color:#27500A">${ss.present}</td>
         <td style="text-align:center;color:#378ADD">${ss.leave}</td>
-        <td style="text-align:center">${ss.present+ss.leave}</td>
       </tr>`;
     });
+    // Coach subtotal row
+    const subtotal=`<tr style="background:#EAF3DE;font-weight:700">
+      <td style="color:#27500A;font-size:12px;padding:5px 10px">${g.coach} 小計</td>
+      <td style="text-align:center">${sl.reduce((a,ss)=>a+ss.classDates.length,0)}</td>
+      <td style="text-align:center;color:#27500A">${g.totalPresent}</td>
+      <td style="text-align:center;color:#378ADD">${g.totalLeave}</td>
+    </tr>`;
+    return [...sessRows,subtotal];
   }).join('');
 
-  // Sub comparison table
+  // Grand total (出席 only, no 請假)
+  const grandTotal=`<tr style="font-weight:700;background:#27500A;color:#fff">
+    <td colspan="2" style="padding:7px 10px">全體合計</td>
+    <td style="text-align:center">${Object.values(byCoach).reduce((a,g)=>a+Object.values(g.sessions).reduce((b,ss)=>b+ss.classDates.length,0),0)}</td>
+    <td style="text-align:center">${totalPresent}</td>
+    <td style="text-align:center;color:#adf">${totalLeave}</td>
+  </tr>`;
+
+  // Sub table
   const allSubRows=rows.filter(r=>r.isSub).sort((a,b)=>b.date.localeCompare(a.date));
   const subTableHTML=allSubRows.length?`
-    <div style="margin-top:16px;font-size:13px;font-weight:500;margin-bottom:8px;display:flex;align-items:center;gap:8px">
-      🔄 代課明細對照表
-      <span style="font-size:11px;font-weight:400;color:#666">（原教練 vs 實際授課教練）</span>
-    </div>
+    <div style="margin-top:16px;font-size:13px;font-weight:500;margin-bottom:8px">🔄 代課明細</div>
     <div style="overflow-x:auto"><table class="report-table">
-      <thead><tr><th>日期</th><th>課程班次</th><th>原教練</th><th>代課教練</th><th>類型</th><th>出席人次</th><th>代課費/人</th><th>代課費小計</th></tr></thead>
+      <thead><tr><th>日期</th><th>課程</th><th>原教練</th><th>代課教練</th><th>類型</th><th>出席</th><th>代課費/人</th><th>小計</th></tr></thead>
       <tbody>${allSubRows.map(r=>`<tr>
-        <td style="white-space:nowrap">${r.date}</td>
-        <td>${r.sessName}</td>
+        <td>${r.date}</td><td>${r.sessName}</td>
         <td style="color:#999">${r.origCoach}</td>
         <td style="font-weight:500;color:#BA7517">${r.coach}</td>
-        <td><span style="font-size:10px;padding:2px 6px;border-radius:6px;background:${r.isExt?'#FCEBEB':'#E6F1FB'};color:${r.isExt?'#501313':'#0C447C'}">${r.isExt?'外部':'系統教練'}</span></td>
-        <td style="text-align:center;font-weight:500">${r.present}</td>
+        <td><span style="font-size:10px;padding:1px 5px;border-radius:5px;background:${r.isExt?'#FCEBEB':'#E6F1FB'};color:${r.isExt?'#501313':'#0C447C'}">${r.isExt?'外部':'系統'}</span></td>
+        <td style="text-align:center">${r.present}</td>
         <td style="text-align:center">${r.subFee?'NT$'+r.subFee.toLocaleString():'—'}</td>
-        <td style="text-align:center;font-weight:500;color:#BA7517">${r.subFee?'NT$'+(r.subFee*r.present).toLocaleString():'—'}</td>
+        <td style="text-align:center;color:#BA7517">${r.subFee?'NT$'+(r.subFee*r.present).toLocaleString():'—'}</td>
       </tr>`).join('')}
-      <tr style="font-weight:600;background:#f0f0f0"><td colspan="5">代課合計</td><td style="text-align:center">${allSubRows.reduce((a,b)=>a+b.present,0)}</td><td></td><td style="text-align:center;color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'—'}</td></tr>
-      </tbody>
-    </table></div>`:'';
+      <tr style="font-weight:600;background:#f0f0f0"><td colspan="5">合計</td><td style="text-align:center">${allSubRows.reduce((a,b)=>a+b.present,0)}</td><td></td><td style="text-align:center;color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'—'}</td></tr>
+      </tbody></table></div>`:''
 
   document.getElementById('att-result').innerHTML=statsHTML+`
     <div style="font-size:11px;color:#666;margin-bottom:8px;padding:6px 10px;background:#f8f8f8;border-radius:8px">
-      ℹ️ 下表以「實際授課教練」統計，代課日的出席人次歸入代課教練，不計原教練。
+      ℹ️ 出席人次已含補課出席 · 各教練有個別合計 · 總計欄只計出席人次不含請假
     </div>
     <div style="overflow-x:auto"><table class="report-table">
-      <thead><tr><th>實際授課教練</th><th>課程班次</th><th>授課堂數</th><th>出席人次</th><th>請假人次</th><th>總計</th></tr></thead>
-      <tbody>${mainRows}</tbody>
-    </table></div>
-    ${subTableHTML}`;
+      <thead><tr><th>教練</th><th>課程班次</th><th>授課堂數</th><th>出席人次</th><th>請假人次</th></tr></thead>
+      <tbody>${mainRows}${grandTotal}</tbody>
+    </table></div>${subTableHTML}`;
 }
 
 
