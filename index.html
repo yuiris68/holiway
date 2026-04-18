@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- HOLIWAY v5.2 BUILD 20260418 -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -6,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v5.1</title>
+<title>哈樂維 v5.2</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +220,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.1</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.2</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -2587,7 +2588,7 @@ function renderCoachForm(editId,d) {
     '#7F77DD','#3C3489','#9C27B0','#6A1B9A',
     '#888780','#555555','#37474F','#00796B',
   ];
-  const swatches=COLORS.map(c=>`<span style="width:26px;height:26px;border-radius:50%;border:3px solid ${d.color===c?'#333':'transparent'};cursor:pointer;display:inline-block;background:${c};margin:3px" onclick="document.getElementById('cf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');
+  const swatches=COLORS.map(c=>`<span style="width:30px;height:30px;border-radius:50%;border:3px solid ${d.color===c?'#1a1a1a':'#e0e0e0'};cursor:pointer;display:inline-block;background:${c};margin:3px;box-shadow:0 1px 3px rgba(0,0,0,.2)" onclick="document.getElementById('cf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');
   document.getElementById('mod-title').textContent = editId?'編輯教練':'新增教練';
   document.getElementById('mod-body').innerHTML = `
     <div class="fg">
