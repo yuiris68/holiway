@@ -647,9 +647,113 @@ async function addEnroll(termId){const sessId=document.getElementById('ae-sess')
 
 // ── MAKEUP ───────────────────────────────────────────
 
-function renderMakeup(){const f=document.getElementById('mk-filter').value;let list=makeupRec;if(f!=='all')list=list.filter(m=>m.status===f);if(!list.length){document.getElementById('makeup-body').innerHTML='<div class="empty">沒有補課記錄</div>';return;}document.getElementById('makeup-body').innerHTML=list.map(m=>{const st=getSt(m.studentId);const orig=getSess(m.originalSessionId);const mkSess=m.makeupSessionId?getSess(m.makeupSessionId):null;const sLabel={pending:'待安排',scheduled:'已排課',done:'已完成'}[m.status];const sCls={pending:'pill-amber',scheduled:'pill-blue',done:'pill-green'}[m.status];const suggested=sessions.filter(s=>{if(s.id===m.originalSessionId)return false;const t=terms.find(x=>x.id===m.termId);const cnt=t?getEnrolled(t.id,s.id).length:0;return s.type===(orig?orig.type:'')&&cnt<s.capacity;}).slice(0,3);return`<div class="card" style="border-left:3px solid ${m.status==='pending'?'var(--amber)':m.status==='scheduled'?'var(--blue)':'var(--green)'}"><div style="display:flex;align-items:center;gap:7px;margin-bottom:5px"><div class="av av-pink">${(st.name||'?')[0]}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${st.name}</div><div style="font-size:11px;color:#999">原課：${orig?orig.name+' '+orig.day+' '+orig.time:'—'} · 請假：${m.leaveDate||'—'}</div>${mkSess?`<div style="font-size:11px;color:#0C447C">補課：${mkSess.name} ${mkSess.day} ${mkSess.time} · ${m.makeupDate}</div>`:''}</div><span class="pill ${sCls}">${sLabel}</span></div>${m.status==='pending'?`<div style="font-size:11px;color:#999;margin-bottom:4px">推薦同類班次</div>${suggested.map(sg=>{const v=getVenue(sg.venueId);return`<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;flex-wrap:wrap">${v?`<span style="font-size:9px;padding:1px 4px;border-radius:3px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}<span style="font-size:11px;flex:1">${sg.name} · ${sg.day} ${sg.time}</span><input type="date" id="mkd-${m.id}-${sg.id}" style="width:auto;font-size:11px;padding:2px 5px"><button class="btn btn-blue" style="font-size:11px;padding:2px 7px" onclick="schedMakeup('${m.id}','${sg.id}',document.getElementById('mkd-${m.id}-${sg.id}').value)">安排</button></div>`;}).join('')||'<div style="font-size:11px;color:#999">無同類空位</div>'}<div style="display:flex;gap:5px;margin-top:5px;flex-wrap:wrap"><select id="mks-${m.id}" style="flex:1;font-size:11px">${sessions.map(s=>{const v=getVenue(s.venueId);return`<option value="${s.id}">${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name}</option>`;}).join('')}</select><input type="date" id="mkd2-${m.id}" style="width:auto;font-size:11px;padding:3px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="schedMakeup('${m.id}',document.getElementById('mks-${m.id}').value,document.getElementById('mkd2-${m.id}').value)">手動安排</button></div>`:''}${m.status==='scheduled'?`<button class="btn btn-outline" style="font-size:11px;padding:2px 8px" onclick="cancelMakeup('${m.id}')">取消安排</button>`:''}</div>`;}).join('');}
-async function schedMakeup(mkId,sessId,date){if(!date){alert('請選擇補課日期');return;}const m=makeupRec.find(x=>x.id===mkId);if(m){m.makeupSessionId=sessId;m.makeupDate=date;m.status='scheduled';}await saveCol('makeup',makeupRec);renderMakeup();}
-async function cancelMakeup(mkId){const m=makeupRec.find(x=>x.id===mkId);if(m){m.makeupSessionId=null;m.makeupDate=null;m.status='pending';}await saveCol('makeup',makeupRec);renderMakeup();}
+function schedMakeupFromUI(mkId) {
+  const sessEl = document.getElementById('mks-'+mkId);
+  const dateEl = document.getElementById('mkd-'+mkId);
+  if(!sessEl||!dateEl||!dateEl.value){alert('請選擇補課日期');return;}
+  schedMakeup(mkId, sessEl.value, dateEl.value);
+}
+
+async function schedMakeup(mkId, sessId, date) {
+  if(!date){alert('請選擇補課日期');return;}
+  const m = makeupRec.find(x=>x.id===mkId); if(!m) return;
+  m.makeupSessionId = sessId;
+  m.makeupDate = date;
+  m.status = 'scheduled';
+  await saveCol('makeup', makeupRec);
+  renderMakeup();
+  hint('補課已安排 ✓');
+}
+
+async function cancelMakeup(mkId) {
+  const m = makeupRec.find(x=>x.id===mkId); if(!m) return;
+  m.makeupSessionId = null;
+  m.makeupDate = null;
+  m.status = 'pending';
+  await saveCol('makeup', makeupRec);
+  renderMakeup();
+}
+
+function renderMakeup() {
+  const f = document.getElementById('mk-filter').value;
+  let list = [...makeupRec].sort((a,b)=>(a.leaveDate||'').localeCompare(b.leaveDate||''));
+  if (f !== 'all') list = list.filter(m => m.status === f);
+
+  const body = document.getElementById('makeup-body');
+  if (!list.length) {
+    body.innerHTML = '<div class="empty">沒有補課記錄</div>';
+    return;
+  }
+
+  body.innerHTML = list.map(m => {
+    const st   = getSt(m.studentId);
+    const orig = getSess(m.originalSessionId);
+    const mkSess = m.makeupSessionId ? getSess(m.makeupSessionId) : null;
+    const sLabel = {pending:'待安排', scheduled:'已排課', done:'已完成'}[m.status] || m.status;
+    const sCls   = {pending:'pill-amber', scheduled:'pill-blue', done:'pill-green'}[m.status] || 'pill-gray';
+    const borderColor = m.status==='pending'?'var(--amber)':m.status==='scheduled'?'var(--blue)':'var(--green)';
+
+    // Session selector options
+    const sessOpts = sessions.map(s => {
+      const v = getVenue(s.venueId);
+      return '<option value="'+s.id+'" '+(m.makeupSessionId===s.id?'selected':'')+'>'+
+        (v?'['+v.shortName+'] ':'')+s.day+' '+s.time+' — '+s.name+'</option>';
+    }).join('');
+
+    return '<div class="card" style="border-left:3px solid '+borderColor+'">' +
+      '<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">' +
+        '<div class="av av-pink">'+(st.name||'?')[0]+'</div>' +
+        '<div style="flex:1">' +
+          '<div style="font-size:13px;font-weight:500">'+st.name+'</div>' +
+          '<div style="font-size:11px;color:#999">原課：'+(orig?orig.name+' '+orig.day+' '+orig.time:'—')+' · 請假日：'+(m.leaveDate||'—')+'</div>' +
+          (mkSess?'<div style="font-size:11px;color:#0C447C">補課安排：'+mkSess.name+' '+mkSess.day+' '+mkSess.time+' · '+m.makeupDate+'</div>':'') +
+        '</div>' +
+        '<span class="pill '+sCls+'">'+sLabel+'</span>' +
+      '</div>' +
+
+      // Schedule section
+      (m.status !== 'done' ?
+        '<div style="background:#f8f8f8;border-radius:8px;padding:9px 11px">' +
+          '<div style="font-size:11px;font-weight:500;margin-bottom:6px;color:#666">安排補課</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+            '<select id="mks-'+m.id+'" style="flex:2;min-width:180px;font-size:12px">'+sessOpts+'</select>' +
+            '<input type="date" id="mkd-'+m.id+'" value="'+(m.makeupDate||today())+'" style="flex:1;min-width:130px;font-size:12px">' +
+            '<button class="btn btn-pink" style="font-size:11px;padding:4px 12px" onclick="schedMakeupFromUI(&quot;'+m.id+'&quot;)">✓ 確認</button>' +
+            (m.status==='scheduled'?'<button class="btn btn-outline" style="font-size:11px;padding:4px 9px" onclick="cancelMakeup(&quot;'+m.id+'&quot;)">取消</button>':'') +
+          '</div>' +
+        '</div>'
+      : '<div style="font-size:11px;color:#27500A">✓ 補課完成</div>') +
+
+      '<div style="display:flex;gap:5px;margin-top:6px">' +
+        (m.status==='done'?'':'<button class="btn btn-outline" style="font-size:11px;padding:2px 8px" onclick="markMakeupDone(&quot;'+m.id+'&quot;)">標記已完成</button>') +
+        '<button class="btn btn-red" style="font-size:11px;padding:2px 8px" onclick="deleteMakeup(&quot;'+m.id+'&quot;)">刪除</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+async function markMakeupDone(mkId) {
+  const m = makeupRec.find(x=>x.id===mkId); if(!m) return;
+  m.status = 'done';
+  const st = students.find(s=>s.id===m.studentId);
+  if(st) st.makeups = Math.max(0,(st.makeups||0)-1);
+  await saveCol('makeup', makeupRec);
+  await saveCol('students', students);
+  renderMakeup(); renderDash();
+}
+
+async function deleteMakeup(mkId) {
+  if(!confirm('確認刪除此補課記錄？')) return;
+  const m = makeupRec.find(x=>x.id===mkId);
+  if(m && m.status!=='done') {
+    const st = students.find(s=>s.id===m.studentId);
+    if(st) st.makeups = Math.max(0,(st.makeups||0)-1);
+  }
+  makeupRec = makeupRec.filter(x=>x.id!==mkId);
+  await saveCol('makeup', makeupRec);
+  if(m) await saveCol('students', students);
+  renderMakeup(); renderDash();
+}
 
 // ── FEE ──────────────────────────────────────────────
 
@@ -1302,24 +1406,31 @@ function renderSignin() {
 function manualCheck(stId, checked) {
   if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
   signinRec[curSiKey][stId] = checked ? 'present' : '';
-  // re-render row status text without full re-render
+  saveSignin().catch(()=>{});
   renderSignin();
 }
 
-function siSetQuick(stId, status) {
+async function siSetQuick(stId, status) {
+  const prev = (signinRec[curSiKey]||{})[stId] || '';
   if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
   signinRec[curSiKey][stId] = status;
-  // Update just this row's UI without full re-render
-  const srow = document.querySelector(`.srow[data-stid="${stId}"]`);
-  if (srow) {
-    srow.className = 'srow ' + status;
-    srow.querySelectorAll('.sb').forEach(b => b.classList.remove('sp','sl','sa'));
-    if (status === 'present') srow.querySelector('.sb:nth-child(1)')?.classList.add('sp');
-    if (status === 'leave')   srow.querySelector('.sb:nth-child(2)')?.classList.add('sl');
-    if (status === 'absent')  srow.querySelector('.sb:nth-child(3)')?.classList.add('sa');
-  } else {
-    renderSignin(); // fallback
+  // Handle leave → create makeup record
+  const st = students.find(s=>s.id===stId);
+  if (st) {
+    if (prev==='present') st.attended = Math.max(0,(st.attended||0)-1);
+    if (prev==='leave')   st.leaves   = Math.max(0,(st.leaves||0)-1);
+    if (status==='present') st.attended = (st.attended||0)+1;
+    if (status==='leave' && prev!=='leave') {
+      st.leaves = (st.leaves||0)+1;
+      const [,date] = curSiKey.split('|');
+      // Only create makeup if not already exists
+      const exists = makeupRec.find(m=>m.studentId===stId&&m.leaveDate===date&&m.originalSessionId===curSiSessId);
+      if (!exists) await createMakeup(stId, curSiSessId, curSiTermId, date, 'manual');
+    }
+    await saveCol('students', students).catch(()=>{});
   }
+  await saveSignin().catch(()=>{});
+  renderSignin();
 }
 
 async function saveManualSignin() {
