@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v4.9</title>
+<title>哈樂維 v5.0</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -219,7 +219,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v4.9</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v5.0</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -344,6 +344,12 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     </div>
     <div id="panel-students" class="panel">
       <div class="sh"><h2>學生名冊</h2>
+        <select id="stu-fee-filter" onchange="renderStudents()" style="font-size:12px;width:auto">
+          <option value="all">全部列表</option>
+          <option value="cleared">學費結清</option>
+          <option value="no-bill">尚未開帳</option>
+          <option value="unpaid">待付學費</option>
+        </select>
         <input type="text" id="stu-search" placeholder="搜尋…" style="width:130px;font-size:12px" oninput="renderStudents()">
         <button class="btn btn-pink" style="margin-left:auto" onclick="openAddStudent()">+ 新增學生</button>
       </div>
@@ -1178,7 +1184,52 @@ async function submitEnrollForStudent(stId) {
 }
 
 
-function renderStudents(){const q=(document.getElementById('stu-search').value||'').toLowerCase();let list=students.filter(st=>!q||st.name.toLowerCase().includes(q)||(st.parent||'').toLowerCase().includes(q));if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${owed>0?`<span class="pill pill-red">欠 ${fmt(owed)}</span>`:hasBills?'<span class="pill pill-green">學費結清</span>':'<span class="pill pill-gray">尚未開帳</span>'}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div><div><div style="font-size:10px;color:#999">出席 / 假剩</div><div style="font-size:12px;font-weight:500">${st.attended||0} / ${(st.leaveMax||2)-(st.leaves||0)}</div></div></div><div style="margin-bottom:6px">${stE.map(e=>{const s=getSess(e.sessionId);const t=terms.find(x=>x.id===e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;return s?`<span style="font-size:11px;padding:2px 7px;border-radius:7px;background:#f8f8f8;display:inline-block;margin:2px 2px 0 0">${v?'['+v.shortName+'] ':''}${t?t.name+' ':''}${s.name} ${s.day} ${s.time}${pr!=null?' <span style="color:#27500A">'+fmt(pr)+'</span>':''}</span>`:''}).join('')||'<span style="font-size:11px;color:#999">未報名</span>'}</div><div style="display:flex;gap:5px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="openIssueFeeForStudent('${st.id}')">開帳單</button><button class="btn btn-outline" style="font-size:11px;padding:2px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openEnrollForStudent('${st.id}')">+ 報名期別</button></div></div>`;}).join('');}
+function renderStudents(){const q=(document.getElementById('stu-search').value||'').toLowerCase();
+  const feeF = document.getElementById('stu-fee-filter') ? document.getElementById('stu-fee-filter').value : 'all';
+  let list=students.filter(st=>{
+    // Search filter
+    if(q && !st.name.toLowerCase().includes(q) && !(st.parent||'').toLowerCase().includes(q)) return false;
+    // Fee status filter
+    if(feeF==='all') return true;
+    const stFees = fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');
+    const stEnrolls = enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');
+    if(feeF==='no-bill') {
+      // Has enrollment but no fee record for that term
+      return stEnrolls.some(e=>!fees.find(f=>f.studentId===st.id&&f.termId===e.termId));
+    }
+    if(feeF==='cleared') {
+      // Has fees and all are paid (bal <= 0)
+      return stFees.length>0 && stFees.every(f=>feeStatus(f).bal<=0);
+    }
+    if(feeF==='unpaid') {
+      // Has at least one fee with remaining balance
+      return stFees.some(f=>feeStatus(f).bal>0);
+    }
+    return true;
+  });if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${(()=>{
+          // Per-term status summary
+          const termGroups=[...new Set(stE.map(e=>e.termId))];
+          if(termGroups.length<=1){
+            return owed>0?'<span class="pill pill-red">欠 '+fmt(owed)+'</span>':hasBills?'<span class="pill pill-green">學費結清</span>':'<span class="pill pill-gray">尚未開帳</span>';
+          }
+          return termGroups.map(tid=>{
+            const t=terms.find(x=>x.id===tid);
+            const tf=fees.filter(f=>f.studentId===st.id&&f.termId===tid&&f.status!=='refunded');
+            const to=tf.reduce((a,f)=>a+feeStatus(f).bal,0);
+            if(!tf.length) return '<span class="pill pill-gray" style="font-size:9px">'+(t?t.name.replace('2026 ',''):'?')+' 未開帳</span>';
+            if(to>0) return '<span class="pill pill-red" style="font-size:9px">'+(t?t.name.replace('2026 ',''):'?')+' 欠'+fmt(to)+'</span>';
+            return '<span class="pill pill-green" style="font-size:9px">'+(t?t.name.replace('2026 ',''):'?')+' 結清</span>';
+          }).join(' ');
+        })()}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div><div><div style="font-size:10px;color:#999">出席 / 假剩</div><div style="font-size:12px;font-weight:500">${st.attended||0} / ${(st.leaveMax||2)-(st.leaves||0)}</div></div></div><div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:flex-start">${stE.map(e=>{
+        const s=getSess(e.sessionId);const t=terms.find(x=>x.id===e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;
+        const termFees=fees.filter(f=>f.studentId===st.id&&f.termId===e.termId&&f.status!=='refunded');
+        const termOwed=termFees.reduce((a,f)=>a+feeStatus(f).bal,0);
+        let feeTag='';
+        if(!termFees.length) feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#412402;margin-left:3px">未開帳</span>';
+        else if(termOwed>0) feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FCEBEB;color:#501313;margin-left:3px">欠'+fmt(termOwed)+'</span>';
+        else feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#EAF3DE;color:#27500A;margin-left:3px">已繳清</span>';
+        return s?'<span style="font-size:11px;padding:3px 8px;border-radius:7px;background:#f8f8f8;display:inline-flex;align-items:center;margin:2px 2px 0 0;white-space:nowrap">'+(v?'['+v.shortName+'] ':'')+( t?'<span style="color:#888;font-size:10px;margin-right:2px">'+t.name+'</span> ':'')+s.name+' '+s.day+' '+s.time+(pr!=null?' <span style="color:#27500A;margin-left:3px">'+fmt(pr)+'</span>':'')+feeTag+'</span>':'';
+      }).join('')||'<span style="font-size:11px;color:#999">未報名</span>'}</div><div style="display:flex;gap:5px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="openIssueFeeForStudent('${st.id}')">開帳單</button><button class="btn btn-outline" style="font-size:11px;padding:2px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openEnrollForStudent('${st.id}')">+ 報名期別</button></div></div>`;}).join('');}
 function stuFormHTML(d){return`<div class="section-div">孩子資料</div><div class="fg"><div class="fr"><label>孩子姓名 *</label><input type="text" id="ns-n" value="${d.name||''}" placeholder="姓名"></div><div class="fr"><label>孩子性別</label><select id="ns-g"><option value="" ${!d.gender?'selected':''}>不填</option><option value="male" ${d.gender==='male'?'selected':''}>男生</option><option value="female" ${d.gender==='female'?'selected':''}>女生</option></select></div></div><div class="fg3"><div class="fr"><label>年齡（歲）</label><input type="number" id="ns-ay" value="${d.ageY||''}" min="0" max="18" placeholder="Y"></div><div class="fr"><label>年齡（月）</label><input type="number" id="ns-am" value="${d.ageM||''}" min="0" max="11" placeholder="M"></div><div class="fr"><label>身高（cm）</label><input type="number" id="ns-h" value="${d.height||''}" min="50" max="200" placeholder="cm"></div></div><div class="section-div">家長資料</div><div class="fg"><div class="fr"><label>家長姓名</label><input type="text" id="ns-p" value="${d.parent||''}" placeholder="家長姓名"></div><div class="fr"><label>聯絡電話</label><input type="tel" id="ns-ph" value="${d.phone||''}" placeholder="手機號碼"></div></div><div class="fr"><label>家長 LINE ID</label><input type="text" id="ns-line" value="${d.lineId||''}" placeholder="LINE ID"></div><div class="section-div">學生課程</div><div class="fr"><label>報名期別</label><select id="ns-term" onchange="nsFilterSess()"><option value="">— 選擇期別 —</option>${terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${(d.termId||'')==t.id?'selected':''} ${termStatus(t).key==='active'&&!d.termId?'selected':''} >${t.name}</option>`).join('')}</select></div><div class="fr"><label>選擇課程（自動帶入堂數）</label><select id="ns-sess" onchange="nsAutoLessons()"><option value="">— 未指定 —</option>${sessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" ${(d.sessionId||'')==s.id?'selected':''}>${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;}).join('')}</select></div><div id="ns-lessons-display" style="background:#EAF3DE;border-radius:8px;padding:7px 9px;font-size:11px;color:#27500A;margin-bottom:2px;display:none">自動帶入每期堂數：<strong id="ns-lessons-val"></strong></div><div class="fr"><label>每期堂數（可手動調整）</label><select id="ns-l">${LESSON_OPTIONS.map(n=>`<option value="${n}" ${(d.period||6)===n?'selected':''}>${n} 堂</option>`).join('')}</select></div>`;}
 function nsAutoLessons(){const sel=document.getElementById('ns-sess');const opt=sel.options[sel.selectedIndex];const lessons=opt&&opt.dataset.lessons?parseInt(opt.dataset.lessons):null;const display=document.getElementById('ns-lessons-display');const val=document.getElementById('ns-lessons-val');const lSel=document.getElementById('ns-l');if(lessons&&lessons>0){display.style.display='block';val.textContent=lessons+' 堂/期';if(lSel)lSel.value=lessons;}else{display.style.display='none';}}
 function nsCalcAge() {
@@ -2799,6 +2850,32 @@ function feeQuickFilter() {
   if(to)   list = list.filter(f=>(f.issuedDate||f.dueDate||'') <= to);
   if(tF!=='all') list=list.filter(f=>f.termId===tF);
   const ws=list.map(f=>({f,s:feeStatus(f)}));
+  if(sF==='no-bill') {
+    const billedStus = new Set(fees.map(f=>f.studentId+':'+f.termId));
+    const noBillRows = [];
+    enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
+      if(!billedStus.has(e.studentId+':'+e.termId)){
+        const st=getSt(e.studentId); const s=getSess(e.sessionId); const t=terms.find(x=>x.id===e.termId);
+        const pr=s?getSessPrice(s.id):null;
+        if(!noBillRows.find(r=>r.studentId===e.studentId&&r.termId===e.termId))
+          noBillRows.push({studentName:st.name,sessName:s?s.name+' '+s.day+' '+s.time:'—',termName:t?t.name:'—',price:pr,studentId:e.studentId,sessId:e.sessionId,termId:e.termId});
+      }
+    });
+    const body=document.getElementById('fee-body');
+    const statsEl=document.getElementById('fee-metrics');
+    if(statsEl) statsEl.innerHTML='<div class="mc"><div class="mc-lbl">尚未開帳</div><div class="mc-val" style="color:#BA7517">'+noBillRows.length+'人</div></div>';
+    if(body) body.innerHTML = noBillRows.length
+      ? '<div style="font-size:12px;color:#BA7517;margin-bottom:10px;padding:8px 10px;background:#FAEEDA;border-radius:8px">⚠ 以下學生已報名但尚未開立帳單</div>' +
+        noBillRows.map(r=>'<div class="card" style="border-left:3px solid #BA7517"><div style="display:flex;align-items:center;gap:8px">'+
+          '<div style="width:32px;height:32px;border-radius:50%;background:#FAEEDA;color:#BA7517;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600">'+r.studentName[0]+'</div>'+
+          '<div style="flex:1"><div style="font-size:13px;font-weight:500">'+r.studentName+'</div>'+
+          '<div style="font-size:11px;color:#999">'+r.sessName+' · '+r.termName+'</div></div>'+
+          (r.price!=null?'<span class="fee-tag">'+fmt(r.price)+'</span>':'')+
+          '<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm(&quot;'+r.termId+'&quot;,&quot;'+r.studentId+'&quot;,&quot;'+r.sessId+'&quot;)">開帳單</button>'+
+          '</div></div>').join('')
+      : '<div class="empty">所有報名學生均已開帳 ✓</div>';
+    return;
+  }
   let filtered=ws;
   if(sF==='unpaid')   filtered=ws.filter(({s})=>s.bal>0&&!s.refunded);
   else if(sF==='paid')     filtered=ws.filter(({s})=>s.bal<=0&&!s.refunded);
@@ -3018,7 +3095,7 @@ function buildSubCoachSelect() {
   if(!sel) return;
   const names = coaches.filter(c=>c.active).map(c=>c.name);
   sel.innerHTML = '<option value="">— 無代課 —</option>' +
-    names.map(n=>`<option value="${n}">${n}（系統教練）</option>`).join('');
+    names.map(n=>`<option value="${n}">${n}</option>`).join('');
 }
 
 function updateSubCoachUI() {
