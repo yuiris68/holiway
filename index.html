@@ -315,6 +315,31 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
       </div>
       <div id="makeup-body"></div>
     </div>
+    <div id="panel-multi" class="panel">
+      <div class="sh">
+        <h2>多元課程券</h2>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-left:auto">
+          <button class="btn btn-outline" id="multi-tab-vouchers" onclick="switchMultiTab('vouchers',this)" style="font-size:12px;padding:4px 12px;background:#E6F1FB;color:#0C447C;border-color:#378ADD">🎟 券管理</button>
+          <button class="btn btn-outline" id="multi-tab-schedule" onclick="switchMultiTab('schedule',this)" style="font-size:12px;padding:4px 12px">📅 課表</button>
+          <button class="btn btn-outline" id="multi-tab-bookings" onclick="switchMultiTab('bookings',this)" style="font-size:12px;padding:4px 12px">📋 預約</button>
+          <button class="btn btn-pink" onclick="openAddVoucher()" style="font-size:12px;padding:4px 12px">+ 新增使用券</button>
+        </div>
+      </div>
+      <div id="multi-pane-vouchers">
+        <div id="voucher-stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px"></div>
+        <div id="voucher-list"></div>
+      </div>
+      <div id="multi-pane-schedule" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <button class="btn btn-pink" onclick="openAddMultiSlot()" style="font-size:12px">+ 新增課表時段</button>
+          <input type="month" id="multi-month-filter" onchange="renderMultiSchedule()" style="font-size:12px;padding:4px 8px;border:0.5px solid #ddd;border-radius:6px" value="">
+        </div>
+        <div id="multi-schedule-list"></div>
+      </div>
+      <div id="multi-pane-bookings" style="display:none">
+        <div id="multi-bookings-list"></div>
+      </div>
+    </div>
     <div id="panel-fee" class="panel">
       <div class="sh"><h2>學費管理</h2>
         <select id="fee-term-filter" style="width:auto;font-size:12px" onchange="renderFee()"><option value="all">全部期別</option></select>
@@ -3934,7 +3959,7 @@ function sw(tab, btn) {
   try {
     ({
       dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
-      signin:()=>{renderSignin();updateSubCoachUI();}, makeup:renderMakeup, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
+      signin:()=>{renderSignin();updateSubCoachUI();}, makeup:renderMakeup, multi:()=>{switchMultiTab('vouchers',document.getElementById('multi-tab-vouchers'));}, fee:()=>{buildFeeMonthFilter();renderFee();}, students:renderStudents,
       'reg-qr':()=>{ buildRqTermSelect(); renderRegQR(); }, coaches:renderCoaches,
       reports:()=>showReport('att', document.querySelector('.tab-btn')),
       'term-att':()=>{}
