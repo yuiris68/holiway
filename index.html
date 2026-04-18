@@ -2579,7 +2579,14 @@ function openAddCoach() { renderCoachForm(null,{name:'',color:'#378ADD',role:'�
 function openEditCoach(id) { const c=coaches.find(x=>x.id===id); if(c) renderCoachForm(id,c); }
 
 function renderCoachForm(editId,d) {
-  const COLORS=['#378ADD','#639922','#D4537E','#BA7517','#7F77DD','#1D9E75','#D85A30','#888780'];
+  const COLORS=[
+    '#378ADD','#0C6BAD','#1565C0','#0D47A1',
+    '#1D9E75','#27500A','#639922','#2E7D32',
+    '#D4537E','#E91E63','#A32D2D','#D85A30',
+    '#BA7517','#F57F17','#8B4513','#FF6F00',
+    '#7F77DD','#3C3489','#9C27B0','#6A1B9A',
+    '#888780','#555555','#37474F','#00796B',
+  ];
   const swatches=COLORS.map(c=>`<span style="width:26px;height:26px;border-radius:50%;border:3px solid ${d.color===c?'#333':'transparent'};cursor:pointer;display:inline-block;background:${c};margin:3px" onclick="document.getElementById('cf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');
   document.getElementById('mod-title').textContent = editId?'編輯教練':'新增教練';
   document.getElementById('mod-body').innerHTML = `
@@ -2588,7 +2595,7 @@ function renderCoachForm(editId,d) {
       <div class="fr"><label>職稱</label><input type="text" id="cf-role" value="${d.role||'教練'}" placeholder="教練 / 助教"></div>
     </div>
     <div class="fr"><label>聯絡電話</label><input type="tel" id="cf-phone" value="${d.phone||''}" placeholder="手機號碼"></div>
-    <div class="fr"><label>代表色</label><input type="hidden" id="cf-color" value="${d.color||'#378ADD'}"><div style="margin-top:4px">${swatches}</div></div>
+    <div class="fr"><label>代表色</label><input type="hidden" id="cf-color" value="${d.color||'#378ADD'}"><div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">${swatches}</div></div>
     <div class="fr"><label>備註</label><input type="text" id="cf-note" value="${d.note||''}" placeholder="備註說明"></div>
     <div class="fr"><label>狀態</label>
       <select id="cf-active"><option value="true" ${d.active!==false?'selected':''}>授課中</option><option value="false" ${d.active===false?'selected':''}>停用</option></select>
