@@ -2387,12 +2387,8 @@ function sw(tab, btn) {
       'term-att':()=>{}
     }[tab]||function(){})();
   } catch(e) {
-    console.error('[sw] Error rendering tab '+tab+':', e);
-    const bodyIds = [tab+'-body', 'coaches-body', 'report-body'];
-    for(const bid of bodyIds){
-      const b = document.getElementById(bid);
-      if(b){ b.innerHTML = '<div style="color:red;padding:20px;font-size:13px">⚠ 頁面載入錯誤：'+e.message+'<br><small>請重新整理頁面</small></div>'; break; }
-    }
+    console.error('[sw] Error rendering tab '+tab+':', e, e.stack);
+    alert('[sw] Error: ' + e.message + '\nStack: ' + (e.stack||'').slice(0,200));
   }
 }
 
