@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v6.4</title>
+<title>哈樂維 v6.5</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -223,7 +223,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.4</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.5</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -1215,6 +1215,38 @@ function renderUnpaidList(){
     </div>
   </div>`;
 
+  // No-bill section: enrolled students with no fee record at all
+  const noBillUnpaid = [];
+  const billedTermKeys = new Set(fees.map(f=>f.studentId+':'+f.termId));
+  enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
+    const key2 = e.studentId+':'+e.termId;
+    if (!billedTermKeys.has(key2) && !noBillUnpaid.find(r=>r.key===key2)) {
+      const st2=getSt(e.studentId); const s2=getSess(e.sessionId); const t2=terms.find(x=>x.id===e.termId);
+      const pr2=s2?getSessPrice(s2.id):null;
+      noBillUnpaid.push({key:key2,name:st2.name,sessName:s2?s2.name+' '+s2.day+' '+s2.time:'—',termName:t2?t2.name:'—',price:pr2,studentId:e.studentId,termId:e.termId,sessId:e.sessionId});
+    }
+  });
+  const noBillSection = noBillUnpaid.length ? `
+    <div style="margin-top:16px;font-size:12px;font-weight:500;color:#BA7517;margin-bottom:8px;padding:8px 12px;background:#FAEEDA;border-radius:8px">
+      ⚠ 尚未開立帳單（${noBillUnpaid.length} 人）— 點「開帳單」立即開立
+    </div>` +
+    noBillUnpaid.map(r=>`<div class="card" style="border-left:3px solid #BA7517">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="av av-pink">${r.name[0]}</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${r.name}</div>
+          <div style="font-size:11px;color:#999">${r.sessName} · ${r.termName}</div>
+        </div>
+        ${r.price!=null?`<span class="fee-tag">${fmt(r.price)}</span>`:''}
+        <button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm('${r.termId}','${r.studentId}','${r.sessId}')">開帳單</button>
+      </div>
+    </div>`).join('') : '';
+
+  if (!unpaidList.length) {
+    body.innerHTML = '<div class="empty" style="padding:30px 0">🎉 目前沒有未繳帳單</div>' + noBillSection;
+    return;
+  }
+
   body.innerHTML = summaryHTML + unpaidList.map(({f, s}) => {
     const st = getSt(f.studentId);
     const t  = f.termId ? terms.find(x => x.id === f.termId) : null;
@@ -1240,7 +1272,7 @@ function renderUnpaidList(){
         <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openFeeHist('${f.id}')">明細</button>
       </div>
     </div>`;
-  }).join('');
+  }).join('') + noBillSection;
 }
 
 
