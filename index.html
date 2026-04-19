@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v6.5</title>
+<title>哈樂維 v6.6</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -223,7 +223,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.5</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.6</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -1075,7 +1075,10 @@ function renderMakeup() {
           '<div style="flex:1"><div style="font-size:13px;font-weight:500">'+r.name+'</div>'+
           '<div style="font-size:11px;color:#999">'+r.sessName+' · '+r.termName+'</div></div>'+
           (r.price!=null?'<span class="fee-tag">'+fmt(r.price)+'</span>':'')+
-          '<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm(&quot;'+r.termId+'&quot;,&quot;'+r.studentId+'&quot;,&quot;'+r.sessId+'&quot;)">開帳單</button>'+
+          (getSess(r.sessId)?.type==='multi'
+          ? '<button class="btn btn-outline" style="font-size:11px;padding:3px 9px;color:#4527A0;border-color:#7F77DD" onclick="openIssueVoucherForStudent(&quot;'+r.studentId+'&quot;,[])">🎟 購券</button>'
+          : '<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm(&quot;'+r.termId+'&quot;,&quot;'+r.studentId+'&quot;,&quot;'+r.sessId+'&quot;)">開帳單</button>'
+        )+
         '</div></div>').join('');
   }
 }
@@ -1238,7 +1241,9 @@ function renderUnpaidList(){
           <div style="font-size:11px;color:#999">${r.sessName} · ${r.termName}</div>
         </div>
         ${r.price!=null?`<span class="fee-tag">${fmt(r.price)}</span>`:''}
-        <button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm('${r.termId}','${r.studentId}','${r.sessId}')">開帳單</button>
+        ${getSess(r.sessId)?.type==='multi'
+          ? `<button class="btn btn-outline" style="font-size:11px;padding:3px 9px;color:#4527A0;border-color:#7F77DD" onclick="openIssueVoucherForStudent('${r.studentId}',[])">🎟 購券</button>`
+          : `<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm('${r.termId}','${r.studentId}','${r.sessId}')">開帳單</button>`}
       </div>
     </div>`).join('') : '';
 
@@ -1403,6 +1408,23 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
     });
   }if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${(()=>{
           // Per-term status summary
+          // Check if student has multi-type sessions
+          const hasMultiEnroll = stE.some(e=>getSess(e.sessionId)?.type==='multi');
+          if (hasMultiEnroll) {
+            const vRemain = getStudentValidRemaining(st.id);
+            const vTotal  = getStudentTotalVouchers(st.id);
+            const multiTag = vTotal===0 ? '<span class="pill pill-amber" style="font-size:10px">🎟 未購券</span>'
+              : vRemain===0 ? '<span class="pill pill-red" style="font-size:10px">🎟 券用完</span>'
+              : '<span class="pill" style="background:#F3F0FE;color:#4527A0;font-size:10px">🎟 剩'+vRemain+'張</span>';
+            // Also show regular fee status if any non-multi enrollment
+            const nonMultiE = stE.filter(e=>getSess(e.sessionId)?.type!=='multi');
+            if (!nonMultiE.length) return multiTag;
+            // Mixed: show both
+            const regOwed = fees.filter(f=>f.studentId===st.id&&nonMultiE.some(e=>e.termId===f.termId)&&f.status!=='refunded').reduce((a,f)=>a+feeStatus(f).bal,0);
+            const regBilled = fees.some(f=>f.studentId===st.id&&nonMultiE.some(e=>e.termId===f.termId));
+            const regTag = regOwed>0?'<span class="pill pill-red" style="font-size:10px">欠'+fmt(regOwed)+'</span>':regBilled?'<span class="pill pill-green" style="font-size:10px">結清</span>':'<span class="pill pill-gray" style="font-size:10px">未開帳</span>';
+            return multiTag + ' ' + regTag;
+          }
           const termGroups=[...new Set(stE.map(e=>e.termId))];
           if(termGroups.length<=1){
             return owed>0?'<span class="pill pill-red">欠 '+fmt(owed)+'</span>':hasBills?'<span class="pill pill-green">學費結清</span>':'<span class="pill pill-gray">尚未開帳</span>';
@@ -1420,9 +1442,25 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
         const termFees=fees.filter(f=>f.studentId===st.id&&f.termId===e.termId&&f.status!=='refunded');
         const termOwed=termFees.reduce((a,f)=>a+feeStatus(f).bal,0);
         let feeTag='';
-        if(!termFees.length) feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#412402;margin-left:3px">未開帳</span>';
-        else if(termOwed>0) feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FCEBEB;color:#501313;margin-left:3px">欠'+fmt(termOwed)+'</span>';
-        else feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#EAF3DE;color:#27500A;margin-left:3px">已繳清</span>';
+        const isMultiSess = s && s.type === 'multi';
+        if (isMultiSess) {
+          // Multi sessions use vouchers, not regular fees
+          const vRemain = getStudentValidRemaining(st.id);
+          const vTotal  = getStudentTotalVouchers(st.id);
+          if (vTotal === 0) {
+            feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#412402;margin-left:3px">🎟 未購券</span>';
+          } else if (vRemain === 0) {
+            feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FCEBEB;color:#501313;margin-left:3px">🎟 券用完</span>';
+          } else {
+            feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#F3F0FE;color:#4527A0;margin-left:3px">🎟 剩'+vRemain+'張</span>';
+          }
+        } else if(!termFees.length) {
+          feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#412402;margin-left:3px">未開帳</span>';
+        } else if(termOwed>0) {
+          feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FCEBEB;color:#501313;margin-left:3px">欠'+fmt(termOwed)+'</span>';
+        } else {
+          feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#EAF3DE;color:#27500A;margin-left:3px">已繳清</span>';
+        }
         return s?'<span style="font-size:11px;padding:3px 8px;border-radius:7px;background:#f8f8f8;display:inline-flex;align-items:center;margin:2px 2px 0 0;white-space:nowrap">'+(v?'['+v.shortName+'] ':'')+( t?'<span style="color:#888;font-size:10px;margin-right:2px">'+t.name+'</span> ':'')+s.name+' '+s.day+' '+s.time+(pr!=null?' <span style="color:#27500A;margin-left:3px">'+fmt(pr)+'</span>':'')+feeTag+'</span>':'';
       }).join('')||'<span style="font-size:11px;color:#999">未報名</span>'}</div><div style="display:flex;gap:5px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="openIssueFeeForStudent('${st.id}')">開帳單</button><button class="btn btn-outline" style="font-size:11px;padding:2px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openEnrollForStudent('${st.id}')">+ 報名期別</button></div></div>`;}).join('');}
 function stuFormHTML(d){return`<div class="section-div">孩子資料</div><div class="fg"><div class="fr"><label>孩子姓名 *</label><input type="text" id="ns-n" value="${d.name||''}" placeholder="姓名"></div><div class="fr"><label>孩子性別</label><select id="ns-g"><option value="" ${!d.gender?'selected':''}>不填</option><option value="male" ${d.gender==='male'?'selected':''}>男生</option><option value="female" ${d.gender==='female'?'selected':''}>女生</option></select></div></div><div class="fg3"><div class="fr"><label>年齡（歲）</label><input type="number" id="ns-ay" value="${d.ageY||''}" min="0" max="18" placeholder="Y"></div><div class="fr"><label>年齡（月）</label><input type="number" id="ns-am" value="${d.ageM||''}" min="0" max="11" placeholder="M"></div><div class="fr"><label>身高（cm）</label><input type="number" id="ns-h" value="${d.height||''}" min="50" max="200" placeholder="cm"></div></div><div class="section-div">家長資料</div><div class="fg"><div class="fr"><label>家長姓名</label><input type="text" id="ns-p" value="${d.parent||''}" placeholder="家長姓名"></div><div class="fr"><label>聯絡電話</label><input type="tel" id="ns-ph" value="${d.phone||''}" placeholder="手機號碼"></div></div><div class="fr"><label>家長 LINE ID</label><input type="text" id="ns-line" value="${d.lineId||''}" placeholder="LINE ID"></div><div class="section-div">學生課程</div><div class="fr"><label>報名期別</label><select id="ns-term" onchange="nsFilterSess()"><option value="">— 選擇期別 —</option>${terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${(d.termId||'')==t.id?'selected':''} ${termStatus(t).key==='active'&&!d.termId?'selected':''} >${t.name}</option>`).join('')}</select></div><div class="fr"><label>選擇課程（自動帶入堂數）</label><select id="ns-sess" onchange="nsAutoLessons()"><option value="">— 未指定 —</option>${sessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" ${(d.sessionId||'')==s.id?'selected':''}>${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;}).join('')}</select></div><div id="ns-lessons-display" style="background:#EAF3DE;border-radius:8px;padding:7px 9px;font-size:11px;color:#27500A;margin-bottom:2px;display:none">自動帶入每期堂數：<strong id="ns-lessons-val"></strong></div><div class="fr"><label>每期堂數（可手動調整）</label><select id="ns-l">${LESSON_OPTIONS.map(n=>`<option value="${n}" ${(d.period||6)===n?'selected':''}>${n} 堂</option>`).join('')}</select></div>`;}
@@ -1534,23 +1572,89 @@ function openIssueFeeForStudent(stId) {
     const s = getSess(e.sessionId);
     const t = terms.find(x => x.id === e.termId);
     const pr = s ? getSessPrice(s.id) : null;
+    const isMultiType = s && s.type === 'multi'; // 多元課程需購券
     const termFees = fees.filter(f => f.studentId === stId && f.termId === e.termId && f.status !== 'refunded');
     const termOwed  = termFees.reduce((a,f) => a + feeStatus(f).bal, 0);
     const isBilled  = termFees.length > 0;
     const isPaid    = isBilled && termOwed <= 0;
     const isUnpaid  = isBilled && termOwed > 0;
-    return { sessId: e.sessionId, termId: e.termId, sess: s, term: t, price: pr, isBilled, isPaid, isUnpaid, termOwed };
+    // For multi sessions: check voucher instead of fee
+    const voucherPack = isMultiType ? voucherPacks.filter(v => v.studentId === stId && v.status !== 'cancelled') : [];
+    const hasVoucher  = voucherPack.length > 0;
+    const voucherRemain = isMultiType ? getStudentValidRemaining(stId) : 0;
+    return { sessId: e.sessionId, termId: e.termId, sess: s, term: t, price: pr,
+      isBilled, isPaid, isUnpaid, termOwed, isMultiType, hasVoucher, voucherRemain };
   }).filter(x => x.sess);
 
-  // If only one enrollment, use simple form
-  if (courseItems.length === 1) {
-    const c = courseItems[0];
+  // If ONLY multi-type sessions, open voucher purchase form
+  const allMulti = courseItems.every(c => c.isMultiType);
+  const anyMulti = courseItems.some(c => c.isMultiType);
+
+  if (allMulti) {
+    openIssueVoucherForStudent(stId, courseItems);
+    return;
+  }
+
+  // If only one non-multi enrollment, use simple form
+  const nonMultiItems = courseItems.filter(c => !c.isMultiType);
+  if (nonMultiItems.length === 1 && !anyMulti) {
+    const c = nonMultiItems[0];
     renderFeeForm(c.termId, stId, c.sessId);
     return;
   }
 
-  // Multiple enrollments - show multi-course bill form
+  // Multiple enrollments (mix or all regular) - show multi-course bill form
   openMultiCourseFee(stId, courseItems);
+}
+
+// Open voucher purchase for student enrolled in multi sessions
+function openIssueVoucherForStudent(stId, courseItems) {
+  const st = getSt(stId);
+  const remain = getStudentValidRemaining(stId);
+  const expDate = addWeeks(today(), 52);
+  const allPacks = voucherPacks.filter(v => v.studentId === stId && v.status !== 'cancelled');
+  const multiSessNames = courseItems.filter(c=>c.isMultiType).map(c=>c.sess.name).join('、');
+
+  document.getElementById('mod-title').textContent = '多元課程使用券 — ' + st.name;
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:#F3F0FE;border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12px;color:#4527A0">
+      <div style="font-weight:500;margin-bottom:3px">🎟 ${st.name} 已報名多元課程</div>
+      <div style="color:#7F77DD">課程：${multiSessNames}</div>
+      <div style="margin-top:4px">目前剩餘有效券：<strong style="font-size:14px">${remain} 張</strong></div>
+    </div>
+    ${allPacks.length ? `<div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:500;color:#555;margin-bottom:5px">購券記錄</div>
+      ${allPacks.map(v => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:0.5px solid #eee;font-size:11px">
+        <span style="flex:1">${fmtD(v.purchaseDate)} 購入 ${v.quantity} 張</span>
+        <span style="color:#999">到期 ${fmtD(v.expiryDate)}</span>
+        <span style="padding:1px 5px;border-radius:4px;font-size:10px;background:${isVoucherValid(v)?'#EAF3DE':'#f0f0f0'};color:${isVoucherValid(v)?'#27500A':'#999'}">${isVoucherValid(v)?'有效':'過期'}</span>
+      </div>`).join('')}
+    </div>` : ''}
+    <div style="font-size:12px;font-weight:500;margin-bottom:8px;color:#4527A0">新增購買使用券</div>
+    <div class="fg">
+      <div class="fr"><label>購買張數 *</label>
+        <input type="number" id="av-qty" value="10" min="1" max="100" step="1">
+      </div>
+      <div class="fr"><label>每張費用 (NT$)</label>
+        <input type="number" id="av-price" value="" placeholder="選填" min="0" step="100">
+      </div>
+    </div>
+    <div class="fg">
+      <div class="fr"><label>購買日期</label>
+        <input type="date" id="av-purchase" value="${today()}">
+      </div>
+      <div class="fr"><label>到期日（預設一年）</label>
+        <input type="date" id="av-expiry" value="${expDate}">
+      </div>
+    </div>
+    <div class="fr"><label>備註</label>
+      <input type="text" id="av-note" placeholder="如：首購、補購...">
+    </div>
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <button class="btn btn-pink" style="flex:1" onclick="createVoucherPack('${stId}')">確認新增使用券</button>
+      <button class="btn btn-outline" onclick="closeMod();switchMultiTab('vouchers',document.getElementById('multi-tab-vouchers'));sw('multi',document.querySelectorAll('.nb')[6])">前往券管理</button>
+    </div>`;
+  document.getElementById('overlay').style.display = 'flex';
 }
 
 function openMultiCourseFee(stId, courseItems) {
@@ -3123,7 +3227,9 @@ function calcReportFee() {
           <td>${r.termName}</td>
           <td>${r.sessName}</td>
           <td style="text-align:right;color:#BA7517">${r.price!=null?fmt(r.price):'未設費率'}</td>
-          <td><button class="btn btn-pink" style="font-size:11px;padding:2px 8px" onclick="renderFeeForm('${r.termId}','${r.studentId}','${r.sessId}')">開帳單</button></td>
+          <td>${getSess(r.sessId)?.type==='multi'
+            ? `<button class="btn btn-outline" style="font-size:11px;padding:2px 8px;color:#4527A0;border-color:#7F77DD" onclick="openIssueVoucherForStudent('${r.studentId}',[])">🎟 購券</button>`
+            : `<button class="btn btn-pink" style="font-size:11px;padding:2px 8px" onclick="renderFeeForm('${r.termId}','${r.studentId}','${r.sessId}')">開帳單</button>`}</td>
         </tr>`).join('')}</tbody>
         <tr style="font-weight:600;background:#FAEEDA"><td colspan="3">尚未開帳合計</td><td style="text-align:right;color:#BA7517">${fmt(noBill2.reduce((a,r)=>a+(r.price||0),0))}</td><td></td></tr>
       </table></div>`;
@@ -3508,8 +3614,13 @@ async function createVoucherPack(fixedStId) {
   const note    = document.getElementById('av-note')?.value?.trim() || '';
   if (!stId)  { alert('請選擇學員'); return; }
   if (qty<=0) { alert('請填寫購買張數'); return; }
+  // Find multi session enrollment to link
+  const multiEnroll = enrolls.find(e => e.studentId===stId && e.status==='enrolled' &&
+    getSess(e.sessionId)?.type === 'multi');
   const pack = { id:'vp'+Date.now(), studentId:stId, quantity:qty, unitPrice:price,
-    purchaseDate:pDate, expiryDate:expiry, note, status:'active', createdAt:today() };
+    purchaseDate:pDate, expiryDate:expiry, note, status:'active', createdAt:today(),
+    termId: multiEnroll?.termId || null,
+    sessionId: multiEnroll?.sessionId || null };
   voucherPacks.push(pack);
   await saveCol('voucherPacks', voucherPacks);
   // If price set, auto-create fee record
