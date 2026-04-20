@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v6.6</title>
+<title>哈樂維 v6.7</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -223,7 +223,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.6</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.7</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -1381,13 +1381,18 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
     const stFees = fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');
     const stEnrolls = enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');
     if(feeF==='no-bill') {
-      return stEnrolls.some(e=>!fees.find(f=>f.studentId===st.id&&f.termId===e.termId));
+      // Exclude multi-type sessions (they use vouchers, not fees)
+      const nonMultiEnrolls = stEnrolls.filter(e=>getSess(e.sessionId)?.type!=='multi');
+      if (!nonMultiEnrolls.length) return false; // all multi = not in no-bill list
+      return nonMultiEnrolls.some(e=>!fees.find(f=>f.studentId===st.id&&f.termId===e.termId&&getSess(e.sessionId)?.type!=='multi'));
     }
     if(feeF==='cleared') {
-      return stFees.length>0 && stFees.every(f=>feeStatus(f).bal<=0);
+      const regularFees = stFees.filter(f=>f.type!=='voucher');
+      return regularFees.length>0 && regularFees.every(f=>feeStatus(f).bal<=0);
     }
     if(feeF==='unpaid') {
-      return stFees.some(f=>feeStatus(f).bal>0);
+      // Only count regular fees (not voucher purchases) for unpaid filter
+      return stFees.filter(f=>f.type!=='voucher').some(f=>feeStatus(f).bal>0);
     }
     return true;
   });
@@ -1633,7 +1638,7 @@ function openIssueVoucherForStudent(stId, courseItems) {
     <div style="font-size:12px;font-weight:500;margin-bottom:8px;color:#4527A0">新增購買使用券</div>
     <div class="fg">
       <div class="fr"><label>購買張數 *</label>
-        <input type="number" id="av-qty" value="10" min="1" max="100" step="1">
+        <input type="number" id="av-qty" value="${courseItems.length&&courseItems[0]?.sess?.periodLessons?courseItems[0].sess.periodLessons:getStudentVouchers(stId).length?10:enrolls.filter(e=>e.studentId===stId&&getSess(e.sessionId)?.type==='multi'&&e.status==='enrolled').reduce((a,e)=>Math.max(a,getSess(e.sessionId)?.periodLessons||0),0)||10}" min="1" max="100" step="1">
       </div>
       <div class="fr"><label>每張費用 (NT$)</label>
         <input type="number" id="av-price" value="" placeholder="選填" min="0" step="100">
@@ -2999,10 +3004,10 @@ function buildFilterHTML(id, extras='') {
   const mFrom=yr+'-'+mo+'-01';
   const mTo=yr+'-'+mo+'-'+String(lastDay).padStart(2,'0');
   return `<div class="report-filter">
-    <div class="fr"><label>開始日期</label><input type="date" id="${id}-from" value="${mFrom}"></div>
-    <div class="fr"><label>結束日期</label><input type="date" id="${id}-to" value="${mTo}"></div>
-    <div class="fr"><label>教練</label><select id="${id}-coach">${coachOpts}</select></div>
-    <div class="fr"><label>課程</label><select id="${id}-sess">${sessOpts}</select></div>
+    <div class="fr"><label>開始日期</label><input type="date" id="${id}-from" value="${mFrom}" onchange="showReport('${currentReportType}',null)"></div>
+    <div class="fr"><label>結束日期</label><input type="date" id="${id}-to" value="${mTo}" onchange="showReport('${currentReportType}',null)"></div>
+    <div class="fr"><label>教練</label><select id="${id}-coach" onchange="showReport('${currentReportType}',null)">${coachOpts}</select></div>
+    <div class="fr"><label>課程</label><select id="${id}-sess" onchange="showReport('${currentReportType}',null)">${sessOpts}</select></div>
     ${extras}
     <button class="btn btn-blue" onclick="showReport('${currentReportType}',null)" style="align-self:flex-end">查詢</button>
   </div>`;
