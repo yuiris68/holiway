@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v6.7</title>
+<title>哈樂維 v7.1</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -223,7 +223,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v6.7</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.1</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -887,12 +887,12 @@ function renderSessions(){
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
-function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fg">
+function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>填單人數上限 <span style="font-size:10px;color:#999;font-weight:400">（審核前最多收件數）</span></label><input type="number" id="sf-form-limit" value="${d.formLimit||d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()" placeholder="同滿班人數"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fg">
   <div class="fr"><label>本期開始日期</label><input type="date" id="sf-start" value="${d.startDate||''}" placeholder="本期上課開始"></div>
   <div class="fr"><label>本期結束日期</label><input type="date" id="sf-end" value="${d.endDate||''}" placeholder="本期上課結束"></div>
 </div>
 <div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
-function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null,startDate:document.getElementById('sf-start')?.value||null,endDate:document.getElementById('sf-end')?.value||null};}
+function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,formLimit:parseInt(document.getElementById('sf-form-limit')?.value)||parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null,startDate:document.getElementById('sf-start')?.value||null,endDate:document.getElementById('sf-end')?.value||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0)sessions[i]={...sessions[i],...d};if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function deleteSession(id){const s=getSess(id);if(!s)return;if(!confirm(`確認刪除「${s.name}」？`))return;sessions=sessions.filter(x=>x.id!==id);terms=terms.map(t=>({...t,sessions:(t.sessions||[]).filter(sid=>sid!==id)}));enrolls=enrolls.filter(e=>e.sessionId!==id);pricing=pricing.filter(p=>p.sessId!==id);await saveCol('sessions',sessions);await saveCol('terms',terms);await saveCol('enrolls',enrolls);await saveCol('pricing',pricing);closeMod();renderSessions();}
@@ -1354,6 +1354,36 @@ function esFilterSess() {
     }).join('');
 }
 
+
+// Auto-create fee after enrollment
+async function autoCreateFeeAfterEnroll(stId, sessId, termId) {
+  if (!sessId || !termId) return;
+  const s = getSess(sessId);
+  if (!s) return;
+  // Skip multi sessions (they use vouchers)
+  if (s.type === 'multi') return;
+  // Skip if fee already exists for this term
+  const existing = fees.find(f => f.studentId===stId && f.termId===termId && f.status!=='refunded');
+  if (existing) return;
+  const pr = getSessPrice(sessId);
+  if (!pr) return; // No price set, skip auto-create
+  const t = terms.find(x=>x.id===termId);
+  const due = t ? addWeeks(t.startDate||today(), 2) : addWeeks(today(), 14);
+  const fee = {
+    id: 'f'+Date.now(),
+    studentId: stId,
+    termId,
+    sessionId: sessId,
+    amount: pr,
+    description: s.name+' '+s.day+' '+s.time,
+    dueDate: due,
+    issuedDate: today(),
+  };
+  fees.push(fee);
+  await saveCol('fees', fees);
+}
+
+
 async function submitEnrollForStudent(stId) {
   const termId = document.getElementById('es-term') ? document.getElementById('es-term').value : '';
   const sessId = document.getElementById('es-sess') ? document.getElementById('es-sess').value : '';
@@ -1366,8 +1396,80 @@ async function submitEnrollForStudent(stId) {
   enrolls.push({id:'e'+Date.now(),termId,sessionId:sessId,studentId:stId,
     status,enrollDate:today(),createdAt:today()});
   await saveCol('enrolls',enrolls);
+  // Auto-create fee if enrolled (not waitlist) and price is set
+  if (status === 'enrolled') {
+    await autoCreateFeeAfterEnroll(stId, sessId, termId);
+  }
+  closeMod(); renderStudents(); renderFee(); renderDash();
+  hint(status==='enrolled'?'報名成功，帳單已自動建立 ✓':'已加入候補名單');
+}
+
+
+function openEditEnroll(enrollId) {
+  const enroll = enrolls.find(e=>e.id===enrollId);
+  if (!enroll) return;
+  const st = getSt(enroll.studentId);
+  const t  = terms.find(x=>x.id===enroll.termId);
+  const ts = t ? sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)) : sessions;
+  const isWait = enroll.status==='waitlist';
+
+  document.getElementById('mod-title').textContent = '調整報名 — ' + st.name;
+  document.getElementById('mod-body').innerHTML = `
+    <div style="background:${isWait?'#FAEEDA':'#F3F0FE'};border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12px">
+      <div>學生：<strong>${st.name}</strong></div>
+      <div>期別：${t?t.name:'—'}</div>
+      <div>狀態：<span style="font-weight:500;color:${isWait?'#BA7517':'#7F77DD'}">${isWait?'候補中':'已報名'}</span></div>
+    </div>
+    <div class="fr"><label>更換課程班次</label>
+      <select id="ee-sess">
+        ${ts.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{
+          const v=getVenue(s.venueId);const cnt=getEnrolled(enroll.termId,s.id).length;
+          return `<option value="${s.id}" ${s.id===enroll.sessionId?'selected':''}>
+            ${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name} (${cnt}/${s.capacity})
+          </option>`;
+        }).join('')}
+      </select>
+    </div>
+    ${isWait?`<button class="btn btn-green" style="width:100%;margin-bottom:6px" onclick="promoteWaitlist('${enrollId}')">✓ 手動升為正式報名</button>`:''}
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-pink" style="flex:1" onclick="saveEnrollChange('${enrollId}')">儲存更換</button>
+      <button class="btn btn-red" onclick="deleteEnroll('${enrollId}')">刪除報名</button>
+    </div>`;
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+async function saveEnrollChange(enrollId) {
+  const enroll = enrolls.find(e=>e.id===enrollId); if (!enroll) return;
+  const newSessId = document.getElementById('ee-sess')?.value;
+  if (!newSessId) return;
+  const prevSessId = enroll.sessionId;
+  enroll.sessionId = newSessId;
+  // Re-check if should be waitlist
+  const cnt = getEnrolled(enroll.termId, newSessId).filter(e=>e.id!==enrollId).length;
+  const sess = getSess(newSessId);
+  enroll.status = (sess && cnt >= sess.capacity) ? 'waitlist' : 'enrolled';
+  await saveCol('enrolls', enrolls);
   closeMod(); renderStudents(); renderDash();
-  hint(status==='enrolled'?'報名成功 ✓':'已加入候補名單');
+  hint('報名已更新 ✓');
+}
+
+async function promoteWaitlist(enrollId) {
+  const enroll = enrolls.find(e=>e.id===enrollId); if (!enroll) return;
+  enroll.status = 'enrolled';
+  await saveCol('enrolls', enrolls);
+  // Auto-create fee
+  await autoCreateFeeAfterEnroll(enroll.studentId, enroll.sessionId, enroll.termId);
+  closeMod(); renderStudents(); renderFee(); renderDash();
+  hint('已升為正式報名，帳單已建立 ✓');
+}
+
+async function deleteEnroll(enrollId) {
+  if (!confirm('確認刪除此報名記錄？')) return;
+  const enroll = enrolls.find(e=>e.id===enrollId);
+  enrolls = enrolls.filter(e=>e.id!==enrollId);
+  await saveCol('enrolls', enrolls);
+  closeMod(); renderStudents(); renderDash();
+  hint('報名記錄已刪除 ✓');
 }
 
 
@@ -1411,7 +1513,7 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
       if(q && !st.name.toLowerCase().includes(q) && !(st.parent||'').toLowerCase().includes(q)) return false;
       return fees.filter(f=>f.studentId===st.id&&f.status!=='refunded').some(f=>feeStatus(f).bal>0);
     });
-  }if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${(()=>{
+  }if(!list.length){document.getElementById('students-body').innerHTML='<div class="empty">沒有符合的學生</div>';return;}document.getElementById('students-body').innerHTML=list.map(st=>{const stE=enrolls.filter(e=>e.studentId===st.id&&(e.status==='enrolled'||e.status==='waitlist'));const stuFees=fees.filter(f=>f.studentId===st.id&&f.status!=='refunded');const owed=stuFees.reduce((a,f)=>a+feeStatus(f).bal,0);const hasBills=stuFees.length>0;const gc=st.gender==='male'?'#378ADD':'#D4537E';return`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:34px;height:34px;border-radius:50%;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">${(st.name||'?')[0]}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:5px"><span style="font-size:14px;font-weight:500">${st.name}</span>${st.gender?`<span style="font-size:10px;padding:1px 6px;border-radius:6px;background:${st.gender==='male'?'#E6F1FB':'#FBEAF0'};color:${gc}">${st.gender==='male'?'♂ 男':'♀ 女'}</span>`:''}</div><div style="font-size:11px;color:#999">${st.parent||'—'} · ${st.phone||'—'}${st.lineId?' · LINE: '+st.lineId:''}</div></div>${(()=>{
           // Per-term status summary
           // Check if student has multi-type sessions
           const hasMultiEnroll = stE.some(e=>getSess(e.sessionId)?.type==='multi');
@@ -1466,7 +1568,10 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
         } else {
           feeTag='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#EAF3DE;color:#27500A;margin-left:3px">已繳清</span>';
         }
-        return s?'<span style="font-size:11px;padding:3px 8px;border-radius:7px;background:#f8f8f8;display:inline-flex;align-items:center;margin:2px 2px 0 0;white-space:nowrap">'+(v?'['+v.shortName+'] ':'')+( t?'<span style="color:#888;font-size:10px;margin-right:2px">'+t.name+'</span> ':'')+s.name+' '+s.day+' '+s.time+(pr!=null?' <span style="color:#27500A;margin-left:3px">'+fmt(pr)+'</span>':'')+feeTag+'</span>':'';
+        const isWait = e.status==='waitlist';
+        const waitTag = isWait ? '<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:#FAEEDA;color:#412402;margin-left:2px">候補</span>' : '';
+        const editEnrollBtn = '<button onclick="openEditEnroll(&quot;'+e.id+'&quot;)" style="font-size:9px;background:none;border:none;cursor:pointer;color:#999;padding:0 2px" title="調整">✎</button>';
+        return s?'<span style="font-size:11px;padding:3px 8px;border-radius:7px;background:'+(isWait?'#FFF8F0':'#f8f8f8')+';display:inline-flex;align-items:center;margin:2px 2px 0 0;white-space:nowrap;border:0.5px solid '+(isWait?'#F0C080':'transparent')+'">'+(v?'['+v.shortName+'] ':'')+( t?'<span style="color:#888;font-size:10px;margin-right:2px">'+t.name+'</span> ':'')+s.name+' '+s.day+' '+s.time+(pr!=null?' <span style="color:#27500A;margin-left:3px">'+fmt(pr)+'</span>':'')+waitTag+feeTag+editEnrollBtn+'</span>':'';
       }).join('')||'<span style="font-size:11px;color:#999">未報名</span>'}</div><div style="display:flex;gap:5px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="openIssueFeeForStudent('${st.id}')">開帳單</button><button class="btn btn-outline" style="font-size:11px;padding:2px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openEnrollForStudent('${st.id}')">+ 報名期別</button></div></div>`;}).join('');}
 function stuFormHTML(d){return`<div class="section-div">孩子資料</div><div class="fg"><div class="fr"><label>孩子姓名 *</label><input type="text" id="ns-n" value="${d.name||''}" placeholder="姓名"></div><div class="fr"><label>孩子性別</label><select id="ns-g"><option value="" ${!d.gender?'selected':''}>不填</option><option value="male" ${d.gender==='male'?'selected':''}>男生</option><option value="female" ${d.gender==='female'?'selected':''}>女生</option></select></div></div><div class="fg3"><div class="fr"><label>年齡（歲）</label><input type="number" id="ns-ay" value="${d.ageY||''}" min="0" max="18" placeholder="Y"></div><div class="fr"><label>年齡（月）</label><input type="number" id="ns-am" value="${d.ageM||''}" min="0" max="11" placeholder="M"></div><div class="fr"><label>身高（cm）</label><input type="number" id="ns-h" value="${d.height||''}" min="50" max="200" placeholder="cm"></div></div><div class="section-div">家長資料</div><div class="fg"><div class="fr"><label>家長姓名</label><input type="text" id="ns-p" value="${d.parent||''}" placeholder="家長姓名"></div><div class="fr"><label>聯絡電話</label><input type="tel" id="ns-ph" value="${d.phone||''}" placeholder="手機號碼"></div></div><div class="fr"><label>家長 LINE ID</label><input type="text" id="ns-line" value="${d.lineId||''}" placeholder="LINE ID"></div><div class="section-div">學生課程</div><div class="fr"><label>報名期別</label><select id="ns-term" onchange="nsFilterSess()"><option value="">— 選擇期別 —</option>${terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${(d.termId||'')==t.id?'selected':''} ${termStatus(t).key==='active'&&!d.termId?'selected':''} >${t.name}</option>`).join('')}</select></div><div class="fr"><label>選擇課程（自動帶入堂數）</label><select id="ns-sess" onchange="nsAutoLessons()"><option value="">— 未指定 —</option>${sessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" ${(d.sessionId||'')==s.id?'selected':''}>${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;}).join('')}</select></div><div id="ns-lessons-display" style="background:#EAF3DE;border-radius:8px;padding:7px 9px;font-size:11px;color:#27500A;margin-bottom:2px;display:none">自動帶入每期堂數：<strong id="ns-lessons-val"></strong></div><div class="fr"><label>每期堂數（可手動調整）</label><select id="ns-l">${LESSON_OPTIONS.map(n=>`<option value="${n}" ${(d.period||6)===n?'selected':''}>${n} 堂</option>`).join('')}</select></div>`;}
 function nsAutoLessons(){const sel=document.getElementById('ns-sess');const opt=sel.options[sel.selectedIndex];const lessons=opt&&opt.dataset.lessons?parseInt(opt.dataset.lessons):null;const display=document.getElementById('ns-lessons-display');const val=document.getElementById('ns-lessons-val');const lSel=document.getElementById('ns-l');if(lessons&&lessons>0){display.style.display='block';val.textContent=lessons+' 堂/期';if(lSel)lSel.value=lessons;}else{display.style.display='none';}}
@@ -1531,7 +1636,12 @@ async function addStu(){
     await saveCol('enrolls',enrolls);
   }
   await saveCol('students',students);
-  closeMod();renderStudents();renderDash();
+  // Auto-create fee if enrolled
+  if(d.sessionId && d.termId){
+    const e2 = enrolls[enrolls.length-1];
+    if(e2 && e2.status==='enrolled') await autoCreateFeeAfterEnroll(st.id,d.sessionId,d.termId);
+  }
+  closeMod();renderStudents();renderFee();renderDash();
 }
 async function saveStudent(id){
   const d=getStuData();
@@ -1886,8 +1996,13 @@ function renderTerms() {
             </div>
             ${sd.start ? `<div class="session-date-chip">📅 ${fmtD(sd.start)} — ${fmtD(sd.end)}</div>` : ''}
             <div style="display:flex;align-items:center;gap:5px">
-              <span style="font-size:11px;font-weight:500;color:${isFull?'#A32D2D':'#27500A'}">${cnt}/${s.capacity}</span>
-              <span style="font-size:10px;color:#27500A">${s.periodLessons}堂</span>
+              ${(()=>{
+                const pCnt2=pendingSubs.filter(p=>p.termId===t.id&&p.status==='pending'&&(p.sessionIds||[]).includes(s.id)).length;
+                const fLim=s.formLimit||s.capacity;
+                const isFormFull2=(cnt+pCnt2)>=fLim;
+                return '<span style="font-size:11px;font-weight:500;color:'+(isFormFull2?'#A32D2D':'#27500A')+'">'+cnt+'/'+s.capacity+'</span>'+(pCnt2?'<span style="font-size:10px;color:#BA7517;background:#FAEEDA;padding:1px 5px;border-radius:5px">待審'+pCnt2+'</span>':'')+(isFormFull2&&cnt<s.capacity?'<span style="font-size:10px;color:#BA7517">填單滿</span>':'');
+              })()}
+              <span style="font-size:10px;color:#27500A">${s.periodLessons}堂</span>${s.formLimit&&s.formLimit!==s.capacity?`<span style="font-size:10px;color:#BA7517;margin-left:3px">填單限${s.formLimit}</span>`:''}
               ${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}
               <div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${Math.min(100,Math.round(cnt/s.capacity*100))}%;background:${isFull?'var(--red)':cnt/s.capacity>=0.8?'var(--amber)':'var(--green)'}"></div></div>
             </div>
@@ -2543,16 +2658,29 @@ function previewParentForm(termId) {
       </div>
       <div class="pf-sec"><div class="pf-sec-title">📋 選擇上課課程</div>
         <div style="font-size:11px;color:#999;margin-bottom:8px">可選擇一個或多個課程</div>
-        ${ts.map(s=>{const v=getVenue(s.venueId);const cnt=getEnrolled(t.id,s.id).length;const isFull=cnt>=s.capacity;const pr=getSessPrice(s.id);const sd=(t.sessionDates||{})[s.id]||{};
-          return`<div style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:0.5px solid #e0e0e0;border-radius:8px;margin-bottom:6px${isFull?';opacity:.6':''}">
+        ${ts.map(s=>{const v=getVenue(s.venueId);
+          const cnt=getEnrolled(t.id,s.id).length;
+          const pendingCnt=pendingSubs.filter(p=>p.termId===t.id&&p.status==='pending'&&(p.sessionIds||[]).includes(s.id)).length;
+          const formLimit = s.formLimit || s.capacity;
+          const totalTaken = cnt + pendingCnt;
+          const isFull = totalTaken >= formLimit; // form is full when enrolled+pending >= formLimit
+          const isCapFull = cnt >= s.capacity; // class is actually full
+          const freeSlots = Math.max(0, formLimit - totalTaken);
+          const pr=getSessPrice(s.id);const sd=(t.sessionDates||{})[s.id]||{};
+          return`<div style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:0.5px solid ${isFull?'#F0C080':'#e0e0e0'};border-radius:8px;margin-bottom:6px;background:${isFull?'#FFFBF0':'#fff'}">
             <input type="checkbox" id="pfc-${s.id}" value="${s.id}" ${isFull?'disabled':''} onchange="pfUpdateLessons()" style="margin-top:3px;width:16px;height:16px;accent-color:var(--pink)">
+            ${isFull?'<div style="font-size:11px;color:#BA7517;margin-top:4px;background:#FFF3CD;padding:4px 8px;border-radius:5px">⏳ '+(isCapFull?'班級已額滿':'名額暫滿，待審核後通知')+'</div>':''}
             <div style="flex:1">
               <div style="font-size:13px;font-weight:500">${s.name}</div>
               <div style="font-size:11px;color:#666">${s.day} ${s.time} · ${s.coach} 教練${v?' · '+v.name:''}</div>
               ${sd.start?`<div class="session-date-chip">📅 ${fmtD(sd.start)} — ${fmtD(sd.end)}</div>`:''}
               <div style="margin-top:4px">
                 <span class="badge ${s.type}">${tLabel(s.type)}</span>
-                <span class="pill ${isFull?'pill-red':'pill-green'}" style="font-size:10px;margin-left:6px">${isFull?'已滿班':cnt+'/'+s.capacity+' 人'}</span>
+                <span class="pill ${isFull?'pill-red':freeSlots<=2?'pill-amber':'pill-green'}" style="font-size:10px;margin-left:6px">
+              ${isFull
+                ? (isCapFull ? '已滿班' : '名額暫滿，請等候通知')
+                : '剩 '+freeSlots+' 名額（共'+s.capacity+'人）'}
+            </span>
                 ${pr!=null?`<span class="fee-tag" style="margin-left:6px">${fmt(pr)}</span>`:''}
                 <span style="font-size:11px;color:#999;margin-left:6px">${s.periodLessons} 堂/期</span>
               </div>
@@ -4310,7 +4438,7 @@ function calcReportAtt() {
   const coachF=document.getElementById('att-coach')?.value||'';
   const sessF =document.getElementById('att-sess')?.value||'';
 
-  // Scan signinRec for attendance
+  // Collect all sign-in rows (one per session+date)
   const rows=[];
   Object.entries(signinRec).forEach(([key,rec])=>{
     const[sessId,date]=key.split('|');if(!date)return;
@@ -4325,70 +4453,41 @@ function calcReportAtt() {
     const present=Object.entries(rec).filter(([k,v])=>!k.startsWith('_')&&v==='present').length;
     const leave  =Object.entries(rec).filter(([k,v])=>!k.startsWith('_')&&v==='leave').length;
     if(present+leave===0)return;
-    rows.push({coach:eff,origCoach:s.coach,isSub,subFee,isExt,sessId,sessName:s.name+' '+s.day+' '+s.time,date,present,leave});
+    rows.push({coach:eff,origCoach:s.coach,isSub,subFee,isExt,
+      sessId,sessName:s.name,sessDay:s.day,sessTime:s.time,date,present,leave,isMulti:false});
   });
 
-  // Add multi-voucher attendance (出席扣抵的多元課程)
-  multiSchedule.forEach(slot => {
-    if (!slot.date || !slot.coach) return;
-    if (from && slot.date < from) return;
-    if (to   && slot.date > to  ) return;
-    if (coachF && slot.coach !== coachF) return;
-    if (sessF) return; // multi slots don't have a sessId to filter
-    const slotAttended = voucherBookings.filter(b =>
-      b.slotId === slot.id && b.status === 'attended'
-    ).length;
-    if (!slotAttended) return;
-    rows.push({
-      coach: slot.coach, origCoach: slot.coach,
-      isSub: false, subFee: 0, isExt: false,
-      sessId: 'multi_' + slot.id,
-      sessName: `多元課 ${slot.time}`,
-      date: slot.date, present: slotAttended, leave: 0, isMulti: true
-    });
+  // Multi-voucher attendance
+  multiSchedule.forEach(slot=>{
+    if(!slot.date||!slot.coach)return;
+    if(from&&slot.date<from)return;if(to&&slot.date>to)return;
+    if(coachF&&slot.coach!==coachF)return;
+    if(sessF)return;
+    const slotAttended=voucherBookings.filter(b=>b.slotId===slot.id&&b.status==='attended').length;
+    if(!slotAttended)return;
+    rows.push({coach:slot.coach,origCoach:slot.coach,isSub:false,subFee:0,isExt:false,
+      sessId:'multi_'+slot.id,sessName:'多元課',sessDay:'',sessTime:slot.time,
+      date:slot.date,present:slotAttended,leave:0,isMulti:true});
   });
 
-  // Group by coach
+  if(!rows.length){document.getElementById('att-result').innerHTML='<div class="empty">此區間無出席簽到資料</div>';return;}
+
+  // Sort: by coach → session → date
+  rows.sort((a,b)=>a.coach.localeCompare(b.coach)||a.sessId.localeCompare(b.sessId)||a.date.localeCompare(b.date));
+
+  // Group by coach for totals
   const byCoach={};
   rows.forEach(r=>{
-    if(!byCoach[r.coach])byCoach[r.coach]={coach:r.coach,sessions:{},totalPresent:0,totalLeave:0,subSessions:[],totalSubFee:0};
+    if(!byCoach[r.coach])byCoach[r.coach]={totalPresent:0,totalLeave:0,classDates:0,totalSubFee:0};
     const g=byCoach[r.coach];
-    if(!g.sessions[r.sessId])g.sessions[r.sessId]={name:r.sessName,present:0,leave:0,classDates:[],subDates:[],subFeeTotal:0};
-    const ss=g.sessions[r.sessId];
-    ss.present+=r.present;ss.leave+=r.leave;ss.classDates.push(r.date);
-    if(r.isMulti) ss.isMulti=true;
-    g.totalPresent+=r.present;g.totalLeave+=r.leave;
-    if(r.isSub){ss.subDates.push(r.date);ss.subFeeTotal+=r.subFee*r.present;g.totalSubFee+=r.subFee*r.present;g.subSessions.push({date:r.date,sessName:r.sessName,present:r.present,subFee:r.subFee,isExt:r.isExt,origCoach:r.origCoach});}
+    g.totalPresent+=r.present;g.totalLeave+=r.leave;g.classDates++;
+    if(r.isSub)g.totalSubFee+=r.subFee*r.present;
   });
-
-  // Add makeup attendance (students who did makeup and were marked present)
-  makeupRec.filter(m=>m.makeupDate&&m.makeupSessionId).forEach(m=>{
-    if(from&&m.makeupDate<from)return;
-    if(to&&m.makeupDate>to)return;
-    const s=getSess(m.makeupSessionId);if(!s)return;
-    const eff=s.coach;
-    if(coachF&&eff!==coachF)return;
-    if(sessF&&m.makeupSessionId!==sessF)return;
-    const mkKey=m.makeupSessionId+'|'+m.makeupDate;
-    const mkRec=signinRec[mkKey]||{};
-    if(mkRec[m.studentId]!=='present')return;
-    // Only add if this session+date wasn't already counted (makeups show in signinRec)
-    // We track makeup presence via signinRec, so it's already included above
-    // Just tag the makeup contribution for the note
-    if(byCoach[eff]&&byCoach[eff].sessions[m.makeupSessionId]){
-      if(!byCoach[eff].sessions[m.makeupSessionId].makeupCount)
-        byCoach[eff].sessions[m.makeupSessionId].makeupCount=0;
-      byCoach[eff].sessions[m.makeupSessionId].makeupCount++;
-    }
-  });
-
   const totalPresent=Object.values(byCoach).reduce((a,b)=>a+b.totalPresent,0);
   const totalLeave  =Object.values(byCoach).reduce((a,b)=>a+b.totalLeave,0);
   const totalSubFee =Object.values(byCoach).reduce((a,b)=>a+b.totalSubFee,0);
 
-  if(!Object.keys(byCoach).length){document.getElementById('att-result').innerHTML='<div class="empty">此區間無出席簽到資料</div>';return;}
-
-  // Stats (總計只含出席，不含請假)
+  // Stats bar
   const statsHTML=`<div class="report-stat-grid">
     <div class="report-stat"><div class="report-stat-val" style="color:#27500A">${totalPresent}</div><div class="report-stat-lbl">總出席人次</div></div>
     <div class="report-stat"><div class="report-stat-val" style="color:#378ADD">${totalLeave}</div><div class="report-stat-lbl">總請假人次</div></div>
@@ -4396,52 +4495,86 @@ function calcReportAtt() {
     <div class="report-stat"><div class="report-stat-val" style="color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'NT$0'}</div><div class="report-stat-lbl">代課費合計</div></div>
   </div>`;
 
-  // Main table: each coach has session rows + a coach total row
-  const mainRows=Object.values(byCoach).flatMap(g=>{
-    const co=coaches.find(c=>c.name===g.coach)||{color:'#888'};
-    const sl=Object.values(g.sessions);
-    const coachDot=`<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${co.color||'#888'};margin-right:4px;vertical-align:middle"></span>`;
-    const sessRows=sl.map((ss,i)=>{
-      const subNote=ss.subDates.length?`<span style="font-size:10px;color:#BA7517;background:#FAEEDA;padding:1px 5px;border-radius:5px;margin-left:3px">代課${ss.subDates.length}堂</span>`:'';
-      const mkNote=ss.makeupCount?`<span style="font-size:10px;color:#7F77DD;background:#F3F0FE;padding:1px 5px;border-radius:5px;margin-left:3px">含補課${ss.makeupCount}</span>`:'';
-      const multiNote=ss.isMulti?'<span style="font-size:10px;color:#7F77DD;background:#F3F0FE;padding:1px 5px;border-radius:5px;margin-left:3px">🎟多元券</span>':'';
-      return`<tr>
-        ${i===0?`<td rowspan="${sl.length+1}" style="font-weight:600;vertical-align:top;white-space:nowrap;padding:8px 10px;background:#fafafa;border-right:2px solid ${co.color||'#888'}">
-          ${coachDot}${g.coach}
-          ${g.subSessions.length?`<div style="font-size:10px;color:#BA7517;margin-top:2px">代課${g.subSessions.length}場</div>`:''}
-        </td>`:''}
-        <td>${ss.name}${subNote}${mkNote}</td>
-        <td style="text-align:center">${ss.classDates.length}</td>
-        <td style="text-align:center;font-weight:500;color:#27500A">${ss.present}</td>
-        <td style="text-align:center;color:#378ADD">${ss.leave}</td>
+  // Build table rows grouped by coach
+  const coaches_seen = [...new Set(rows.map(r=>r.coach))];
+  const mainRows = coaches_seen.flatMap(coachName=>{
+    const co = coaches.find(c=>c.name===coachName)||{color:'#888'};
+    const coachRows = rows.filter(r=>r.coach===coachName);
+    const g = byCoach[coachName];
+    const coachDot = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${co.color||'#888'};margin-right:4px;vertical-align:middle"></span>`;
+
+    // Group by session within this coach
+    const sessList = [...new Set(coachRows.map(r=>r.sessId))];
+    const sessRowsHTML = sessList.flatMap(sessId=>{
+      const sessRows = coachRows.filter(r=>r.sessId===sessId);
+      const s = getSess(sessId);
+      const sessLabel = sessRows[0].sessName + (sessRows[0].sessDay?' '+sessRows[0].sessDay:'') + ' ' + sessRows[0].sessTime;
+      const isMulti = sessRows[0].isMulti;
+      const multiTag = isMulti ? '<span style="font-size:10px;color:#7F77DD;background:#F3F0FE;padding:1px 5px;border-radius:5px;margin-left:3px">🎟多元券</span>' : '';
+
+      // Per-date rows
+      const dateRows = sessRows.map((r,di)=>{
+        const subTag = r.isSub ? `<span style="font-size:9px;color:#BA7517;background:#FAEEDA;padding:1px 4px;border-radius:4px;margin-left:3px">${r.isExt?'外部':'系統'}代課</span>` : '';
+        return `<tr style="border-bottom:0.5px solid #f0f0f0">
+          ${di===0?`<td rowspan="${sessRows.length}" style="vertical-align:top;padding:6px 8px;font-size:11px;font-weight:500;white-space:nowrap;background:#fafafa;border-right:1px solid #eee;max-width:140px">${sessLabel}${multiTag}</td>`:''}
+          <td style="padding:5px 8px;font-size:12px;white-space:nowrap;color:#555">${fmtD(r.date)}${subTag}</td>
+          <td style="text-align:center;padding:5px 8px;font-size:14px;font-weight:600;color:#27500A">${r.present}</td>
+          <td style="text-align:center;padding:5px 8px;color:#378ADD">${r.leave||0}</td>
+          <td style="text-align:center;padding:5px 8px">
+            <span style="font-size:11px;padding:2px 7px;border-radius:8px;background:${r.present>=6?'#EAF3DE':r.present>=3?'#FFF8E6':'#f5f5f5'};color:${r.present>=6?'#27500A':r.present>=3?'#BA7517':'#999'}">${r.present} 人</span>
+          </td>
+        </tr>`;
+      });
+
+      // Session subtotal row
+      const sessTotal = sessRows.reduce((a,r)=>a+r.present,0);
+      const sessLeave = sessRows.reduce((a,r)=>a+r.leave,0);
+      const sessAvg   = sessRows.length ? Math.round(sessTotal/sessRows.length*10)/10 : 0;
+      const subtotalRow = `<tr style="background:#F8FFF4;border-top:1px solid #C0DD97">
+        <td style="font-size:11px;font-weight:500;color:#27500A;padding:4px 8px">小計（${sessRows.length}堂）</td>
+        <td style="text-align:center;font-weight:600;color:#27500A;padding:4px 8px">${sessTotal}</td>
+        <td style="text-align:center;color:#378ADD;padding:4px 8px">${sessLeave}</td>
+        <td style="text-align:center;font-size:11px;color:#666;padding:4px 8px">平均 ${sessAvg}</td>
       </tr>`;
+
+      return [...dateRows, subtotalRow];
     });
-    // Coach subtotal row
-    const subtotal=`<tr style="background:#EAF3DE;font-weight:700">
-      <td style="color:#27500A;font-size:12px;padding:5px 10px">${g.coach} 小計</td>
-      <td style="text-align:center">${sl.reduce((a,ss)=>a+ss.classDates.length,0)}</td>
-      <td style="text-align:center;color:#27500A">${g.totalPresent}</td>
-      <td style="text-align:center;color:#378ADD">${g.totalLeave}</td>
+
+    // Coach total row
+    const coachTotal = `<tr style="background:#27500A;color:#fff;font-weight:700">
+      <td colspan="2" style="padding:6px 10px">${coachDot}${coachName} 合計（${g.classDates}堂）</td>
+      <td style="text-align:center;padding:6px 8px">${g.totalPresent}</td>
+      <td style="text-align:center;padding:6px 8px;color:#adf">${g.totalLeave}</td>
+      <td style="text-align:center;padding:6px 8px;font-size:11px">${g.classDates?Math.round(g.totalPresent/g.classDates*10)/10+'人/堂':''}</td>
+    </tr>
+    <tr style="height:6px;background:#fff"><td colspan="5"></td></tr>`;
+
+    // Coach header row
+    const coachHeader = `<tr style="background:#EAF3DE;border-top:2px solid ${co.color||'#27500A'}">
+      <td colspan="5" style="padding:7px 10px;font-size:13px;font-weight:600;color:#1a1a1a">
+        ${coachDot}${coachName}
+      </td>
     </tr>`;
-    return [...sessRows,subtotal];
+
+    return [coachHeader, ...sessRowsHTML, coachTotal];
   }).join('');
 
-  // Grand total (出席 only, no 請假)
-  const grandTotal=`<tr style="font-weight:700;background:#27500A;color:#fff">
+  // Grand total
+  const grandTotal = `<tr style="font-weight:700;background:#1a1a1a;color:#fff">
     <td colspan="2" style="padding:7px 10px">全體合計</td>
-    <td style="text-align:center">${Object.values(byCoach).reduce((a,g)=>a+Object.values(g.sessions).reduce((b,ss)=>b+ss.classDates.length,0),0)}</td>
-    <td style="text-align:center">${totalPresent}</td>
-    <td style="text-align:center;color:#adf">${totalLeave}</td>
+    <td style="text-align:center;padding:7px 8px">${totalPresent}</td>
+    <td style="text-align:center;padding:7px 8px;color:#adf">${totalLeave}</td>
+    <td style="text-align:center;padding:7px 8px">${rows.length?Math.round(totalPresent/rows.length*10)/10+'人/堂':''}</td>
   </tr>`;
 
-  // Sub table
-  const allSubRows=rows.filter(r=>r.isSub).sort((a,b)=>b.date.localeCompare(a.date));
-  const subTableHTML=allSubRows.length?`
+  // Sub-table
+  const subRows = rows.filter(r=>r.isSub).sort((a,b)=>b.date.localeCompare(a.date));
+  const subTableHTML = subRows.length ? `
     <div style="margin-top:16px;font-size:13px;font-weight:500;margin-bottom:8px">🔄 代課明細</div>
     <div style="overflow-x:auto"><table class="report-table">
       <thead><tr><th>日期</th><th>課程</th><th>原教練</th><th>代課教練</th><th>類型</th><th>出席</th><th>代課費/人</th><th>小計</th></tr></thead>
-      <tbody>${allSubRows.map(r=>`<tr>
-        <td>${r.date}</td><td>${r.sessName}</td>
+      <tbody>${subRows.map(r=>`<tr>
+        <td>${r.date}</td><td>${r.sessName} ${r.sessDay} ${r.sessTime}</td>
         <td style="color:#999">${r.origCoach}</td>
         <td style="font-weight:500;color:#BA7517">${r.coach}</td>
         <td><span style="font-size:10px;padding:1px 5px;border-radius:5px;background:${r.isExt?'#FCEBEB':'#E6F1FB'};color:${r.isExt?'#501313':'#0C447C'}">${r.isExt?'外部':'系統'}</span></td>
@@ -4449,15 +4582,20 @@ function calcReportAtt() {
         <td style="text-align:center">${r.subFee?'NT$'+r.subFee.toLocaleString():'—'}</td>
         <td style="text-align:center;color:#BA7517">${r.subFee?'NT$'+(r.subFee*r.present).toLocaleString():'—'}</td>
       </tr>`).join('')}
-      <tr style="font-weight:600;background:#f0f0f0"><td colspan="5">合計</td><td style="text-align:center">${allSubRows.reduce((a,b)=>a+b.present,0)}</td><td></td><td style="text-align:center;color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'—'}</td></tr>
-      </tbody></table></div>`:''
+      <tr style="font-weight:600;background:#f0f0f0"><td colspan="5">合計</td><td style="text-align:center">${subRows.reduce((a,b)=>a+b.present,0)}</td><td></td><td style="text-align:center;color:#BA7517">${totalSubFee?'NT$'+totalSubFee.toLocaleString():'—'}</td></tr>
+      </tbody></table></div>` : '';
 
-  document.getElementById('att-result').innerHTML=statsHTML+`
+  document.getElementById('att-result').innerHTML = statsHTML + `
     <div style="font-size:11px;color:#666;margin-bottom:8px;padding:6px 10px;background:#f8f8f8;border-radius:8px">
-      ℹ️ 出席人次已含補課出席 · 各教練有個別合計 · 總計欄只計出席人次不含請假
+      ℹ️ 每列為單堂課出席人次・各班次顯示小計與平均人數・各教練有獨立合計
     </div>
-    <div style="overflow-x:auto"><table class="report-table">
-      <thead><tr><th>教練</th><th>課程班次</th><th>授課堂數</th><th>出席人次</th><th>請假人次</th></tr></thead>
+    <div style="overflow-x:auto"><table class="report-table" style="min-width:500px">
+      <thead><tr>
+        <th>課程班次</th><th>日期</th>
+        <th style="text-align:center">出席</th>
+        <th style="text-align:center">請假</th>
+        <th style="text-align:center">人數</th>
+      </tr></thead>
       <tbody>${mainRows}${grandTotal}</tbody>
     </table></div>${subTableHTML}`;
 }
