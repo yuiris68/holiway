@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v7.4</title>
+<title>哈樂維 v7.5</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -233,7 +233,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.4</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.5</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -4547,7 +4547,8 @@ function calcReportAtt() {
       const sessLeave = sessRows.reduce((a,r)=>a+r.leave,0);
       const sessAvg   = sessRows.length ? Math.round(sessTotal/sessRows.length*10)/10 : 0;
       const subtotalRow = `<tr style="background:#f5f5f5;border-top:1px solid #999;border-bottom:1px solid #999">
-        <td style="font-size:11px;font-weight:500;color:#27500A;padding:4px 8px">小計（${sessRows.length}堂）</td>
+        <td style="font-size:11px;font-weight:500;color:#555;padding:4px 8px;font-style:italic"></td>
+        <td style="font-size:11px;font-style:italic;color:#555;padding:4px 8px">小計（${sessRows.length}堂）</td>
         <td style="text-align:center;font-weight:700;color:#000;padding:4px 8px">${sessTotal}</td>
         <td style="text-align:center;color:#444;padding:4px 8px">${sessLeave}</td>
         <td style="text-align:center;font-size:11px;color:#444;padding:4px 8px">平均 ${sessAvg}</td>
