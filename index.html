@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v7.5</title>
+<title>哈樂維 v7.6</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -233,7 +233,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.5</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.6</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -266,7 +266,15 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     </div>
     <div id="panel-terms" class="panel">
       <div class="sh"><h2>期別/報名</h2>
-        <select id="term-filter" style="width:auto;font-size:12px" onchange="renderTerms()"><option value="active_all" selected>全部（不含已結束）</option><option value="all">顯示全部</option><option value="active">進行中</option><option value="enrolling">報名中</option><option value="upcoming">即將開課</option><option value="ended">已結束</option></select>
+        <select id="term-filter" style="width:auto;font-size:12px" onchange="renderTerms()">
+          <option value="active_all" selected>全部（不含已結束）</option>
+          <option value="all">顯示全部</option>
+          <option value="active">進行中</option>
+          <option value="enrolling">報名中</option>
+          <option value="upcoming">即將開課</option>
+          <option value="ended">已結束</option>
+        </select>
+        <input type="text" id="term-year-search" placeholder="搜尋年度或名稱..." onchange="renderTerms()" oninput="renderTerms()" style="font-size:12px;padding:4px 8px;border:0.5px solid #ddd;border-radius:6px;width:150px">
         <button class="btn btn-pink" style="margin-left:auto" onclick="openAddTerm()">+ 新增期別</button>
       </div>
       <div id="terms-body"></div>
@@ -1956,14 +1964,38 @@ function buildRqTermSelect() {
 // Override renderTerms to add new buttons + show session dates + holidays
 function renderTerms() {
   const f = document.getElementById('term-filter').value;
-  let list = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
-  if (f === 'active_all') {
+  const yearQ = (document.getElementById('term-year-search')?.value||'').trim().toLowerCase();
+  let list = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate)); // 遞增排序（舊→新）
+
+  // Count ended terms before filtering (for summary display)
+  const endedTerms = terms.filter(t=>termStatus(t).key==='ended');
+
+  if (yearQ) {
+    // Search mode: search across ALL terms by name or year
+    list = list.filter(t =>
+      t.name.toLowerCase().includes(yearQ) ||
+      (t.startDate||'').includes(yearQ) ||
+      (t.endDate||'').includes(yearQ)
+    );
+  } else if (f === 'active_all') {
     list = list.filter(t => termStatus(t).key !== 'ended');
   } else if (f !== 'all') {
     list = list.filter(t => termStatus(t).key === f);
   }
 
-  document.getElementById('terms-body').innerHTML = list.map(t => {
+  // Build ended terms summary (shown only in active_all mode without search)
+  const showEndedSummary = !yearQ && f === 'active_all' && endedTerms.length > 0;
+  const endedSummaryHTML = showEndedSummary ? `
+    <div style="margin-bottom:12px;padding:10px 14px;background:#f8f8f8;border-radius:10px;border:0.5px solid #e0e0e0;display:flex;align-items:center;gap:10px">
+      <div style="flex:1">
+        <span style="font-size:12px;color:#888">📁 已結束期別：</span>
+        <span style="font-size:12px;font-weight:500;color:#555">${endedTerms.length} 個（${[...new Set(endedTerms.map(t=>(t.startDate||'').slice(0,4)).filter(Boolean))].sort().join('、')} 年）</span>
+      </div>
+      <button class="btn btn-outline" style="font-size:11px;padding:3px 10px;white-space:nowrap" onclick="document.getElementById('term-filter').value='ended';renderTerms()">查看已結束</button>
+      <button class="btn btn-outline" style="font-size:11px;padding:3px 10px;white-space:nowrap" onclick="document.getElementById('term-year-search').value='${new Date().getFullYear()-1}';renderTerms()">搜尋去年</button>
+    </div>` : '';
+
+  document.getElementById('terms-body').innerHTML = endedSummaryHTML + list.map(t => {
     const st = termStatus(t);
     // Include sessions explicitly added to term, plus any with enrollments for this term
     const enrolledSessIds = new Set(enrolls.filter(e=>e.termId===t.id).map(e=>e.sessionId));
