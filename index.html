@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v5.2 BUILD 20260418B -->
+<!-- HOLIWAY v5.2 BUILD 20260512V4-FIX -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -543,13 +543,25 @@ function hint(m){const e=document.getElementById('sv');e.textContent=m;setTimeou
 async function fsGet(col){const snap=await db.collection(col).get();return snap.docs.map(d=>({id:d.id,...d.data()}));}
 async function fsSet(col,id,data){await db.collection(col).doc(id).set(data);}
 async function fsDel(col,id){await db.collection(col).doc(id).delete();}
-async function fsSave(col,items){
-  const batch=db.batch();
-  // clear then rewrite (simple approach for small datasets)
-  const snap=await db.collection(col).get();
-  snap.docs.forEach(d=>batch.delete(d.ref));
-  items.forEach(item=>{const ref=db.collection(col).doc(item.id);batch.set(ref,item);});
-  await batch.commit();hint('已同步雲端 ✓');
+async function fsSave(col, items) {
+  const CHUNK = 200; // delete + set 各一批，合計不超過 400，低於 Firestore 500 筆上限
+  // ── Step 1：分批刪除現有文件 ──
+  const snap = await db.collection(col).get();
+  const existingRefs = snap.docs.map(d => d.ref);
+  for (let i = 0; i < existingRefs.length; i += CHUNK) {
+    const batch = db.batch();
+    existingRefs.slice(i, i + CHUNK).forEach(ref => batch.delete(ref));
+    await batch.commit();
+  }
+  // ── Step 2：分批寫入新資料 ──
+  for (let i = 0; i < items.length; i += CHUNK) {
+    const batch = db.batch();
+    items.slice(i, i + CHUNK).forEach(item => {
+      batch.set(db.collection(col).doc(item.id), item);
+    });
+    await batch.commit();
+  }
+  hint('已同步雲端 ✓');
 }
 
 // ── Seed data ────────────────────────────────────────
@@ -600,6 +612,7 @@ const VENUE_COLORS=[
 let venues=[],sessions=[],terms=[],enrolls=[],students=[],signinRec={},makeupRec=[],fees=[],txns=[],pricing=[];
 let coaches=[],subLog=[],pendingSubs=[];
 let sessVenueFilter='all',feeSub='bills';
+let _dirtySigninKeys = new Set(); // 追蹤本次有變動的 signin key，避免全量寫入
 
 // ── Init ─────────────────────────────────────────────
 
@@ -905,14 +918,15 @@ function renderSessions(){
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
-function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}<option value="halou" ${d.type==='halou'?'selected':''}>哈樂屋外課</option>${getSessionTypes().filter(t=>!['adv','snake','multi','yoyo','halou'].includes(t.id)).map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>填單人數上限 <span style="font-size:10px;color:#999;font-weight:400">（審核前最多收件數）</span></label><input type="number" id="sf-form-limit" value="${d.formLimit||d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()" placeholder="同滿班人數"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fg">
+function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>填單人數上限 <span style="font-size:10px;color:#999;font-weight:400">（審核前最多收件數）</span></label><input type="number" id="sf-form-limit" value="${d.formLimit||d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()" placeholder="同滿班人數"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fg">
   <div class="fr"><label>本期開始日期</label><input type="date" id="sf-start" value="${d.startDate||''}" placeholder="本期上課開始"></div>
   <div class="fr"><label>本期結束日期</label><input type="date" id="sf-end" value="${d.endDate||''}" placeholder="本期上課結束"></div>
 </div>
 <div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
 function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,formLimit:parseInt(document.getElementById('sf-form-limit')?.value)||parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null,startDate:document.getElementById('sf-start')?.value||null,endDate:document.getElementById('sf-end')?.value||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
-async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0)sessions[i]={...sessions[i],...d};if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
+async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0)sessions[i]={...sessions[i],...d};if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}else{// ③ 定價清空時刪除舊的 pricing，避免開帳單帶入舊金額
+const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0){pricing.splice(pi,1);await saveCol('pricing',pricing);}}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function deleteSession(id){const s=getSess(id);if(!s)return;if(!confirm(`確認刪除「${s.name}」？`))return;sessions=sessions.filter(x=>x.id!==id);terms=terms.map(t=>({...t,sessions:(t.sessions||[]).filter(sid=>sid!==id)}));enrolls=enrolls.filter(e=>e.sessionId!==id);pricing=pricing.filter(p=>p.sessId!==id);await saveCol('sessions',sessions);await saveCol('terms',terms);await saveCol('enrolls',enrolls);await saveCol('pricing',pricing);closeMod();renderSessions();}
 
 // ── TERMS ────────────────────────────────────────────
@@ -1084,21 +1098,6 @@ function renderMakeup() {
       '</div>' +
     '</div>';
   }).join('');
-  // Append no-bill section if any
-  if(noBillRows.length) {
-    body.innerHTML += '<div style="margin-top:16px;font-size:12px;font-weight:500;color:#BA7517;margin-bottom:8px;padding:7px 10px;background:#FAEEDA;border-radius:8px">⚠ 尚未開立帳單（'+noBillRows.length+'人）</div>' +
-      noBillRows.map(r=>'<div class="card" style="border-left:3px solid #BA7517;opacity:.85">'+
-        '<div style="display:flex;align-items:center;gap:8px">'+
-          '<div class="av av-pink">'+r.name[0]+'</div>'+
-          '<div style="flex:1"><div style="font-size:13px;font-weight:500">'+r.name+'</div>'+
-          '<div style="font-size:11px;color:#999">'+r.sessName+' · '+r.termName+'</div></div>'+
-          (r.price!=null?'<span class="fee-tag">'+fmt(r.price)+'</span>':'')+
-          (getSess(r.sessId)?.type==='multi'
-          ? '<button class="btn btn-outline" style="font-size:11px;padding:3px 9px;color:#4527A0;border-color:#7F77DD" onclick="openIssueVoucherForStudent(&quot;'+r.studentId+'&quot;,[])">🎟 購券</button>'
-          : '<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="renderFeeForm(&quot;'+r.termId+'&quot;,&quot;'+r.studentId+'&quot;,&quot;'+r.sessId+'&quot;)">開帳單</button>'
-        )+
-        '</div></div>').join('');
-  }
 }
 
 async function markMakeupDone(mkId) {
@@ -1237,10 +1236,11 @@ function renderUnpaidList(){
   </div>`;
 
   // No-bill section: enrolled students with no fee record at all
-  const noBillUnpaid = [];
-  const billedTermKeys = new Set(fees.map(f=>f.studentId+':'+f.termId));
+const noBillUnpaid = [];
+  // ⑩ key 加入 sessionId，避免同期多課只要一張帳單就全視為已開帳
+  const billedTermKeys = new Set(fees.map(f=>f.studentId+':'+f.termId+':'+(f.sessionId||'')));
   enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
-    const key2 = e.studentId+':'+e.termId;
+    const key2 = e.studentId+':'+e.termId+':'+e.sessionId;
     if (!billedTermKeys.has(key2) && !noBillUnpaid.find(r=>r.key===key2)) {
       const st2=getSt(e.studentId); const s2=getSess(e.sessionId); const t2=terms.find(x=>x.id===e.termId);
       const pr2=s2?getSessPrice(s2.id):null;
@@ -1502,9 +1502,12 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
     const stEnrolls = enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');
     if(feeF==='no-bill') {
       // Exclude multi-type sessions (they use vouchers, not fees)
+      if(feeF==='no-bill') {
+      // Exclude multi-type sessions (they use vouchers, not fees)
       const nonMultiEnrolls = stEnrolls.filter(e=>getSess(e.sessionId)?.type!=='multi');
       if (!nonMultiEnrolls.length) return false; // all multi = not in no-bill list
-      return nonMultiEnrolls.some(e=>!fees.find(f=>f.studentId===st.id&&f.termId===e.termId&&getSess(e.sessionId)?.type!=='multi'));
+      // ⑩ key 加入 sessionId，逐課判斷是否已開帳
+      return nonMultiEnrolls.some(e=>!fees.find(f=>f.studentId===st.id&&f.termId===e.termId&&(f.sessionId===e.sessionId||!f.sessionId)&&getSess(e.sessionId)?.type!=='multi'));
     }
     if(feeF==='cleared') {
       const regularFees = stFees.filter(f=>f.type!=='voucher');
@@ -2292,7 +2295,13 @@ function renderSignin() {
 
 function manualCheck(stId, checked) {
   if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
-  signinRec[curSiKey][stId] = checked ? 'present' : '';
+  if (checked) {
+    signinRec[curSiKey][stId] = 'present';
+  } else {
+    // ⑦ 取消勾選改為 delete，避免寫入空字串污染簽到記錄
+    delete signinRec[curSiKey][stId];
+  }
+  _dirtySigninKeys.add(curSiKey);
   saveSignin().catch(()=>{});
   renderSignin();
 }
@@ -2301,6 +2310,7 @@ async function siSetQuick(stId, status) {
   const prev = (signinRec[curSiKey]||{})[stId] || '';
   if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
   signinRec[curSiKey][stId] = status;
+  _dirtySigninKeys.add(curSiKey);
   // Handle leave → create makeup record
   const st = students.find(s=>s.id===stId);
   if (st) {
@@ -2329,11 +2339,21 @@ async function saveManualSignin() {
 }
 
 async function saveSignin() {
-  const batch = db.batch();
-  Object.entries(signinRec).forEach(([key, val]) => {
-    batch.set(db.collection('signin').doc(key), val);
-  });
-  await batch.commit();
+  // 只寫本次有變動的 key；若 dirty set 為空（如強制全寫）則 fallback 寫全部
+  const keysToSave = _dirtySigninKeys.size > 0
+    ? [..._dirtySigninKeys]
+    : Object.keys(signinRec);
+  const CHUNK = 200;
+  for (let i = 0; i < keysToSave.length; i += CHUNK) {
+    const batch = db.batch();
+    keysToSave.slice(i, i + CHUNK).forEach(key => {
+      if (signinRec[key]) {
+        batch.set(db.collection('signin').doc(key), signinRec[key]);
+      }
+    });
+    await batch.commit();
+  }
+  _dirtySigninKeys.clear();
 }
 
 // Keep original setSI for QR mode
@@ -2344,6 +2364,7 @@ async function setSI(key, stId, status, termId, sessId) {
   const prev = (signinRec[key]||{})[stId] || '';
   if (!signinRec[key]) signinRec[key] = {};
   signinRec[key][stId] = status;
+  _dirtySigninKeys.add(key);
 
   const st = students.find(s=>s.id===stId);
   if (st) {
@@ -2366,6 +2387,7 @@ async function setSI(key, stId, status, termId, sessId) {
 async function setMkSI(key, stId, mkId, status) {
   if (!signinRec[key]) signinRec[key] = {};
   signinRec[key][stId] = status;
+  _dirtySigninKeys.add(key);
   if (status==='present') {
     const m = makeupRec.find(x=>x.id===mkId);
     if (m) { m.status='done'; const st=students.find(s=>s.id===stId); if(st) st.makeups=Math.max(0,(st.makeups||0)-1); }
@@ -2390,6 +2412,7 @@ async function confirmScan(sessId,date,termId) {
   const key=sessId+'|'+date;
   if(!signinRec[key]) signinRec[key]={};
   signinRec[key][stId]='present';
+  _dirtySigninKeys.add(key);
   const st=students.find(s=>s.id===stId); if(st) st.attended=(st.attended||0)+1;
   await saveSignin(); await saveCol('students',students);
   document.getElementById('mod-body').innerHTML=`<div style="text-align:center;padding:16px 0"><div style="font-size:48px">✅</div><div style="font-size:15px;font-weight:500;color:#27500A;margin-top:8px">簽到成功</div></div><button class="btn btn-outline" style="width:100%" onclick="closeMod()">關閉</button>`;
@@ -2616,10 +2639,13 @@ async function approveReg(pendingId) {
   const st = {id:'s'+Date.now(),name:p.childName,parent:p.parentName,phone:p.phone,lineId:p.lineId,gender:p.gender,ageY:p.ageY,ageM:p.ageM,height:p.height,period:p.autoLessons||6,attended:0,leaves:0,makeups:0,leaveMax:2,startDate:today()};
   students.push(st);
   if (t) {
-    sl.forEach(s=>{
+    // ⑤ 改為序列 await + 6碼 suffix，避免 enrolls id 碰撞
+    for (const s of sl) {
       const cnt=getEnrolled(t.id,s.id).length;
-      enrolls.push({id:'e'+Date.now()+Math.random().toString(36).slice(2,4),termId:p.termId,sessionId:s.id,studentId:st.id,status:cnt>=s.capacity?'waitlist':'enrolled',enrollDate:today(),createdAt:today()});
-    });
+      const uid='e'+Date.now()+Math.random().toString(36).slice(2,8);
+      enrolls.push({id:uid,termId:p.termId,sessionId:s.id,studentId:st.id,status:cnt>=s.capacity?'waitlist':'enrolled',enrollDate:today(),createdAt:today()});
+      await new Promise(r=>setTimeout(r,2));
+    }
   }
   p.status = 'approved';
   await saveCol('students',students); await saveCol('enrolls',enrolls); await saveCol('pending',pendingSubs);
@@ -2629,7 +2655,9 @@ async function approveReg(pendingId) {
 
 async function rejectReg(pendingId) {
   if (!confirm('確認拒絕此報名？')) return;
-  pendingSubs = pendingSubs.filter(p=>p.id!==pendingId);
+  // ⑥ 改為標記 rejected 保留記錄，避免資料永久消失
+  const p = pendingSubs.find(x=>x.id===pendingId);
+  if (p) { p.status = 'rejected'; p.rejectedAt = new Date().toLocaleString('zh-TW',{hour12:false}); }
   await saveCol('pending', pendingSubs); renderRegQR();
 }
 
@@ -3003,6 +3031,7 @@ async function saveMakeupSlot(mkId, studentId, origSessId, termId) {
   if (!signinRec[mkKey]) signinRec[mkKey] = {};
   // Mark as scheduled (will show as '補課' badge in renderSignin)
   signinRec[mkKey]['_makeup_'+studentId] = { studentId, origSessId, scheduled:true };
+  _dirtySigninKeys.add(mkKey);
 
   await saveCol('makeup', makeupRec);
   await saveSignin();
@@ -3033,15 +3062,20 @@ async function toggleAtt(sessId, date, stId, termId, origSessId) {
   // cycle: '' → present → leave → absent → ''
   const next = cur===''?'present':cur==='present'?'leave':cur==='leave'?'absent':'';
   signinRec[key][stId] = next;
+  _dirtySigninKeys.add(key);
   // Update student stats
   const st = students.find(s=>s.id===stId);
   if (st) {
     if (cur==='present') st.attended = Math.max(0,(st.attended||0)-1);
     if (next==='present') st.attended = (st.attended||0)+1;
     if (cur==='leave')   st.leaves   = Math.max(0,(st.leaves||0)-1);
-    if (next==='leave'&&(st.leaves||0)<(st.leaveMax||2)) {
-      st.leaves=(st.leaves||0)+1;
-      await createMakeup(stId, origSessId, termId, date);
+    if (next==='leave') {
+      // ④ 用 exists 判斷，避免請假→出席→請假循環重複建補課
+      const mkExists = makeupRec.find(m=>m.studentId===stId&&m.leaveDate===date&&m.originalSessionId===origSessId&&m.status!=='done');
+      if (!mkExists) {
+        if((st.leaves||0)<(st.leaveMax||2)) st.leaves=(st.leaves||0)+1;
+        await createMakeup(stId, origSessId, termId, date);
+      }
     }
   }
   await saveSignin();
@@ -3383,14 +3417,15 @@ function calcReportFee() {
   const fFrom2=document.getElementById('fr-from')?.value||'';
   const fTo2  =document.getElementById('fr-to')?.value||'';
   const fTerm2=document.getElementById('fr-term')?.value||'';
-  const billedKeys2=new Set(fees.map(f=>f.studentId+':'+f.termId));
+  // ⑩ key 加入 sessionId
+  const billedKeys2=new Set(fees.map(f=>f.studentId+':'+f.termId+':'+(f.sessionId||'')));
   const noBill2=[];
   enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
     const t2=terms.find(x=>x.id===e.termId);
     if(fTerm2&&e.termId!==fTerm2)return;
     if(fFrom2&&t2&&t2.endDate<fFrom2)return;
     if(fTo2&&t2&&t2.startDate>fTo2)return;
-    const key2=e.studentId+':'+e.termId;
+    const key2=e.studentId+':'+e.termId+':'+e.sessionId;
     if(!billedKeys2.has(key2)&&!noBill2.find(r=>r.key===key2)){
       const st2=getSt(e.studentId);const s2=getSess(e.sessionId);const pr2=s2?getSessPrice(s2.id):null;
       noBill2.push({key:key2,name:st2.name,termName:t2?t2.name:'—',sessName:s2?s2.name+' '+s2.day+' '+s2.time:'—',price:pr2,studentId:e.studentId,termId:e.termId,sessId:e.sessionId});
@@ -3431,10 +3466,11 @@ function feeQuickFilter() {
   if(tF!=='all') list=list.filter(f=>f.termId===tF);
   const ws=list.map(f=>({f,s:feeStatus(f)}));
   if(sF==='no-bill') {
-    const billedStus = new Set(fees.map(f=>f.studentId+':'+f.termId));
+// ⑩ key 加入 sessionId
+    const billedStus = new Set(fees.map(f=>f.studentId+':'+f.termId+':'+(f.sessionId||'')));
     const noBillRows = [];
     enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
-      if(!billedStus.has(e.studentId+':'+e.termId)){
+      if(!billedStus.has(e.studentId+':'+e.termId+':'+e.sessionId)){
         const st=getSt(e.studentId); const s=getSess(e.sessionId); const t=terms.find(x=>x.id===e.termId);
         const pr=s?getSessPrice(s.id):null;
         if(!noBillRows.find(r=>r.studentId===e.studentId&&r.termId===e.termId))
@@ -4240,6 +4276,7 @@ async function initApp() {
     coaches     = await fsGet('coaches');
     subLog      = await fsGet('sublog');
     await loadMultiData();
+    await loadCustomTypes(); // ③ 載入自訂課程類型
     const srSnap = await db.collection('signin').get();
     signinRec = {};
     srSnap.docs.forEach(d => { signinRec[d.id] = d.data(); });
@@ -4957,10 +4994,15 @@ function applyMonthFilter() {
   renderFee();
 }
 
-// Patch renderFee to also filter by date when quick-filter is set
-const _baseBuildFee = buildFeTermFilter;
+// buildFeTermFilter：填充學費頁期別下拉 + 月份下拉
 function buildFeTermFilter(){
-  _baseBuildFee();
+  const sel = document.getElementById('fee-term-filter');
+  if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="all">全部期別</option>' +
+    [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate))
+      .map(t=>`<option value="${t.id}">${t.name}</option>`).join('');
+  if(prev) sel.value = prev;
   buildFeeMonthFilter();
 }
 
