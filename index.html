@@ -1502,8 +1502,6 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
     const stEnrolls = enrolls.filter(e=>e.studentId===st.id&&e.status==='enrolled');
     if(feeF==='no-bill') {
       // Exclude multi-type sessions (they use vouchers, not fees)
-      if(feeF==='no-bill') {
-      // Exclude multi-type sessions (they use vouchers, not fees)
       const nonMultiEnrolls = stEnrolls.filter(e=>getSess(e.sessionId)?.type!=='multi');
       if (!nonMultiEnrolls.length) return false; // all multi = not in no-bill list
       // ⑩ key 加入 sessionId，逐課判斷是否已開帳
