@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v7.8 BUILD 20261015-G123 -->
+<!-- HOLIWAY v7.9 BUILD 20261015-G123-CHECKED -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v7.8</title>
+<title>哈樂維 v7.9</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -233,7 +233,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.8</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.9</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -711,7 +711,7 @@ function renderDash(){
   // ── Metrics bar ──────────────────────────────────
   document.getElementById('dash-metrics').innerHTML=`
     <div class="mc"><div class="mc-lbl">進行期別</div><div class="mc-val" style="font-size:13px">${activeTerm?activeTerm.name.replace('2026 ',''):'—'}</div></div>
-    <div class="mc"><div class="mc-lbl">在籍學生</div><div class="mc-val">${students.length}</div></div>
+    <div class="mc"><div class="mc-lbl">在籍學生</div><div class="mc-val">${new Set(enrolls.filter(e=>e.status==='enrolled'&&terms.some(t=>t.id===e.termId&&termStatus(t).key!=='ended')).map(e=>e.studentId)).size}</div><div style="font-size:10px;color:#aaa">學生檔案共 ${students.length} 位</div></div>
     <div class="mc"><div class="mc-lbl">今日簽到</div><div class="mc-val" style="color:#27500A">${todaySignins}</div></div>
     <div class="mc"><div class="mc-lbl">待補課</div><div class="mc-val" style="color:${makeupRec.filter(m=>m.status==='pending').length>0?'#BA7517':'inherit'}">${makeupRec.filter(m=>m.status==='pending').length}</div></div>
     <div class="mc"><div class="mc-lbl">未收學費</div><div class="mc-val" style="color:${totalOwed>0?'#A32D2D':'inherit'}">${fmt(totalOwed)}</div></div>`;
@@ -892,7 +892,8 @@ function openSessionRuns(sessId) {
     const sDate    = sd.start || t.startDate;
     const eDate    = sd.end   || t.endDate;
     const st       = termStatus(t);
-    const termFees = fees.filter(f => f.termId === t.id && enrolled.some(e => e.studentId === f.studentId));
+    // 只計算這門課的帳單（同期其他課的帳單不算進來）
+    const termFees = fees.filter(f => f.termId === t.id && enrolled.some(e => e.studentId === f.studentId) && (feeCoversSession(f,sessId)||isLegacyUnlinkedFee(f)));
     const totalBilled = termFees.reduce((a,f) => a+f.amount, 0);
     const totalPaid   = termFees.reduce((a,f) => a+feeStatus(f).paid, 0);
 
@@ -986,7 +987,20 @@ function getSFData(){return{venueId:document.getElementById('sf-venue').value||n
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0){sessions[i]={...sessions[i],...d};delete sessions[i].startDate;delete sessions[i].endDate;}if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}else{// ③ 定價清空時刪除舊的 pricing，避免開帳單帶入舊金額
 const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0){pricing.splice(pi,1);await saveCol('pricing',pricing);}}await saveCol('sessions',sessions);closeMod();renderSessions();}
-async function deleteSession(id){const s=getSess(id);if(!s)return;if(!confirm(`確認刪除「${s.name}」？`))return;sessions=sessions.filter(x=>x.id!==id);terms=terms.map(t=>({...t,sessions:(t.sessions||[]).filter(sid=>sid!==id)}));enrolls=enrolls.filter(e=>e.sessionId!==id);pricing=pricing.filter(p=>p.sessId!==id);await saveCol('sessions',sessions);await saveCol('terms',terms);await saveCol('enrolls',enrolls);await saveCol('pricing',pricing);closeMod();renderSessions();}
+async function deleteSession(id){
+  const s=getSess(id);if(!s)return;
+  const en=enrolls.filter(e=>e.sessionId===id);
+  const tIn=terms.filter(t=>(t.sessions||[]).includes(id));
+  let msg=`確認刪除班次「${s.name} ${s.day} ${s.time}」？`;
+  if(en.length||tIn.length) msg+=`\n\n會一併移除：\n${tIn.length?`・從 ${tIn.length} 個期別中移除\n`:''}${en.length?`・報名紀錄 ${en.length} 筆（點名總覽、續報都會找不到這些學生）\n`:''}・此班次的學費設定\n\n帳單、收款、簽到紀錄會保留。\n💡 如果只是不再開課，建議改按「停用」，資料完整保留、隨時可恢復。`;
+  if(!confirm(msg))return;
+  sessions=sessions.filter(x=>x.id!==id);
+  terms=terms.map(t=>({...t,sessions:(t.sessions||[]).filter(sid=>sid!==id)}));
+  enrolls=enrolls.filter(e=>e.sessionId!==id);
+  pricing=pricing.filter(p=>p.sessId!==id);
+  await saveCol('sessions',sessions);await saveCol('terms',terms);await saveCol('enrolls',enrolls);await saveCol('pricing',pricing);
+  closeMod();renderSessions();renderTerms();renderDash();
+}
 
 // ── TERMS ────────────────────────────────────────────
 
@@ -2059,7 +2073,7 @@ function renderStudents(){try{updateOrphanBtn();}catch(e){}const q=(document.get
           }).join(' ');
         })()}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div>${(()=>{const a=studentAttStats(st.id);return a?`<div title="${a.termName}"><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">${a.present} / ${a.leave}<span style="font-size:10px;color:${a.leave>a.leaveMax?'#A32D2D':'#999'};font-weight:400"> (可補${Math.max(0,a.leaveMax-a.leave)})</span></div></div>`:`<div><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">—</div></div>`;})()}</div><div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:flex-start">${stE.map(e=>{
         const s=getSess(e.sessionId);const t=terms.find(x=>x.id===e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;
-        const termFees=fees.filter(f=>f.studentId===st.id&&f.termId===e.termId&&f.status!=='refunded');
+        const termFees=fees.filter(f=>f.studentId===st.id&&f.termId===e.termId&&f.status!=='refunded'&&(feeCoversSession(f,e.sessionId)||isLegacyUnlinkedFee(f)));
         const termOwed=termFees.reduce((a,f)=>a+feeStatus(f).bal,0);
         let feeTag='';
         const isMultiSess = s && s.type === 'multi';
@@ -2285,7 +2299,7 @@ function openIssueFeeForStudent(stId) {
     const t = terms.find(x => x.id === e.termId);
     const pr = s ? getSessPrice(s.id) : null;
     const isMultiType = s && s.type === 'multi'; // 多元課程需購券
-    const termFees = fees.filter(f => f.studentId === stId && f.termId === e.termId && f.status !== 'refunded');
+    const termFees = fees.filter(f => f.studentId === stId && f.termId === e.termId && f.status !== 'refunded' && (feeCoversSession(f,e.sessionId)||isLegacyUnlinkedFee(f)));
     const termOwed  = termFees.reduce((a,f) => a + feeStatus(f).bal, 0);
     const isBilled  = termFees.length > 0;
     const isPaid    = isBilled && termOwed <= 0;
@@ -2384,15 +2398,15 @@ function openMultiCourseFee(stId, courseItems) {
     ${courseItems.map((c, i) => {
       const v = c.sess ? getVenue(c.sess.venueId) : null;
       return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:0.5px solid ${c.isPaid?"#C0DD97":"#e0e0e0"};border-radius:8px;margin-bottom:6px;background:${c.isPaid?"#F5FFF0":"#fff"};opacity:${c.isPaid?0.8:1}">
-        <input type="checkbox" id="mf-chk-${i}" ${c.isPaid?'disabled':'checked'}
+        <input type="checkbox" id="mf-chk-${i}" ${c.isPaid?'disabled':(c.term&&termStatus(c.term).key==='ended'?'':'checked')}
           onchange="mcfRecalc()" style="width:16px;height:16px;accent-color:var(--pink);flex-shrink:0">
         <div style="flex:1">
           <div style="font-size:12px;font-weight:500">${c.sess.name} · ${c.sess.day} ${c.sess.time} ${c.isPaid?'<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#EAF3DE;color:#27500A">已繳清</span>':c.isUnpaid?'<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#412402">欠'+fmt(c.termOwed)+'</span>':'<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#F0E6FF;color:#7F77DD">未開帳</span>'}</div>
-          <div style="font-size:11px;color:#999">${c.term ? c.term.name : '—'}${v ? ' · ' + v.shortName : ''} · ${c.sess.periodLessons}堂/期</div>
+          <div style="font-size:11px;color:#999">${c.term&&termStatus(c.term).key==='ended'?'<span style="color:#BA7517">已結束期別 · </span>':''}${c.term ? c.term.name : '—'}${v ? ' · ' + v.shortName : ''} · ${c.sess.periodLessons}堂/期</div>
         </div>
         <div style="text-align:right;flex-shrink:0">
           ${c.isPaid
-            ? '<div style="text-align:right;min-width:90px"><div style="font-size:14px;font-weight:700;color:#27500A">已繳清</div><div style="font-size:10px;color:#27500A">'+(c.price!=null?'NT$'+fmt(c.price):'')+'/期</div></div>'
+            ? '<div style="text-align:right;min-width:90px"><div style="font-size:14px;font-weight:700;color:#27500A">已繳清</div><div style="font-size:10px;color:#27500A">'+(c.price!=null?fmt(c.price):'')+'/期</div></div>'
             : '<div><input type="number" id="mf-price-'+i+'" value="'+(c.price||'')+'" placeholder="未設費率" min="0" step="100" oninput="mcfRecalc()" style="width:90px;text-align:right;font-size:12px;padding:4px 6px"><div style="font-size:10px;color:#999;margin-top:1px">NT$/期</div></div>'
           }
         </div>
@@ -5306,7 +5320,12 @@ async function initParentRegPage(termId) {
     renderParentRegForm(termId);
   } else {
     // Show term selection if no termId in URL
-    const termList = [...terms].sort((a,b)=>a.startDate.localeCompare(b.startDate));
+    const _td = today();
+    const termList = [...terms].filter(t => termStatus(t).key !== 'ended'
+        && !(t.enrollEndDate && _td > t.enrollEndDate)
+        && !((t.preRegStartDate || t.enrollStartDate) && _td < (t.preRegStartDate || t.enrollStartDate)))
+      .sort((a,b)=>a.startDate.localeCompare(b.startDate));
+    if (!termList.length) { content.innerHTML = '<div style="background:#fff;border-radius:12px;padding:30px 20px;text-align:center"><div style="font-size:40px">🗓</div><div style="font-size:15px;font-weight:500;margin:8px 0">目前沒有開放報名的期別</div><div style="font-size:13px;color:#666">敬請期待下一期招生！</div></div>'; return; }
     content.innerHTML = `
       <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:12px;text-align:center">
         <div style="font-size:16px;font-weight:500;margin-bottom:16px">請選擇報名期別</div>
