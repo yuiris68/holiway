@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v7.7 BUILD 20261015-ROSTER-FEESYNC -->
+<!-- HOLIWAY v7.8 BUILD 20261015-G123 -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v7.7</title>
+<title>哈樂維 v7.8</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -233,7 +233,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.7</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v7.8</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -251,7 +251,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     </nav>
     <div class="user-area">
       <span id="user-email" style="font-size:11px;color:#999"></span>
-      <button class="nb" onclick="sw('reg-qr',this)" style="background:#E1F5EE;color:#085041;border-color:#1D9E75">報名QR</button>
+      <button class="nb" onclick="sw('reg-qr',this)" style="background:#E1F5EE;color:#085041;border-color:#1D9E75">報名QR<span id="pending-badge" style="display:none;margin-left:4px;background:#E24B4A;color:#fff;border-radius:8px;padding:0 6px;font-size:10px"></span></button>
     <button class="logout-btn" onclick="doLogout()">登出</button>
     </div>
   </div>
@@ -327,6 +327,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
         </label>
         <button class="btn btn-green" id="manual-save-btn" style="display:none;font-size:11px;padding:4px 12px" onclick="saveManualSignin()">💾 儲存簽到</button>
       </div>
+      <div id="si-req-area"></div>
       <div id="signin-body"></div>
     </div>
     <div id="panel-makeup" class="panel">
@@ -400,6 +401,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
         </select>
         <input type="text" id="stu-search" placeholder="搜尋…" style="width:130px;font-size:12px" oninput="renderStudents()">
         <button class="btn btn-pink" style="margin-left:auto" onclick="openAddStudent()">+ 新增學生</button>
+        <button class="btn btn-outline" id="orphan-btn" style="display:none;font-size:11px;color:#BA7517;border-color:#FAC775" onclick="cleanupOrphans()"></button>
       </div>
       <div id="students-body"></div>
     </div>
@@ -488,6 +490,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+try { db.settings({ ignoreUndefinedProperties: true, merge: true }); } catch(e) {}
 
 // ── Auth ─────────────────────────────────────────────
 async function doLogin(){
@@ -517,12 +520,15 @@ function doLogout(){if(confirm('確認登出？'))auth.signOut();}
     document.getElementById('parent-reg-page').style.display = 'block';
     // Load Firebase data needed for the form, then render
     initParentRegPage(termId);
+  } else if (mode === 'signin') {
+    // 家長掃課堂 QR Code 簽到（免登入）
+    initParentSigninPage(params);
   }
 })();
 
 auth.onAuthStateChanged(user=>{
   // Never interfere if in parent registration mode
-  if(new URLSearchParams(window.location.search).get('mode')==='register') return;
+  if(['register','signin'].includes(new URLSearchParams(window.location.search).get('mode'))) return;
   if(user){
     document.getElementById('login-screen').style.display='none';
     document.getElementById('app-screen').style.display='block';
@@ -540,26 +546,43 @@ function hideLoading(){document.getElementById('loading-overlay').style.display=
 function hint(m){const e=document.getElementById('sv');e.textContent=m;setTimeout(()=>e.textContent='',2000);}
 
 // ── Firestore helpers ────────────────────────────────
-async function fsGet(col){const snap=await db.collection(col).get();return snap.docs.map(d=>({id:d.id,...d.data()}));}
-async function fsSet(col,id,data){await db.collection(col).doc(id).set(data);}
-async function fsDel(col,id){await db.collection(col).doc(id).delete();}
-async function fsSave(col, items) {
-  const CHUNK = 200; // delete + set 各一批，合計不超過 400，低於 Firestore 500 筆上限
-  // ── Step 1：分批刪除現有文件 ──
+// ── 差異寫入：只寫有變動的文件、只刪自己刪掉的文件 ──
+// 不再整批刪除重寫，避免覆蓋他人（家長報名、其他裝置）剛寫入的資料，也大幅減少寫入次數
+const _synced = {}; // col -> Map(id -> 序列化內容)，代表「上次與雲端一致的狀態」
+function _snapOf(col){ return _synced[col] || (_synced[col] = new Map()); }
+function _ser(v){
+  if (v === undefined) return undefined;
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(x => { const s=_ser(x); return s===undefined?'null':s; }).join(',') + ']';
+  return '{' + Object.keys(v).sort().filter(k => v[k] !== undefined).map(k => JSON.stringify(k)+':'+_ser(v[k])).join(',') + '}';
+}
+async function fsGet(col){
   const snap = await db.collection(col).get();
-  const existingRefs = snap.docs.map(d => d.ref);
-  for (let i = 0; i < existingRefs.length; i += CHUNK) {
+  const arr = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const m = _snapOf(col); m.clear();
+  arr.forEach(x => m.set(String(x.id), _ser(x)));
+  return arr;
+}
+async function fsSet(col,id,data){await db.collection(col).doc(id).set(data);_snapOf(col).set(String(id),_ser(data));}
+async function fsDel(col,id){await db.collection(col).doc(id).delete();_snapOf(col).delete(String(id));}
+async function fsSave(col, items) {
+  const m = _snapOf(col);
+  const byId = new Map();
+  (items||[]).forEach(it => { if (it && it.id != null) byId.set(String(it.id), it); });
+  const ops = [];
+  byId.forEach((it, id) => { const s = _ser(it); if (m.get(id) !== s) ops.push({type:'set', id, s, it}); });
+  m.forEach((_, id) => { if (!byId.has(id)) ops.push({type:'del', id}); });
+  if (!ops.length) return;
+  const CHUNK = 400;
+  for (let i = 0; i < ops.length; i += CHUNK) {
+    const part = ops.slice(i, i + CHUNK);
     const batch = db.batch();
-    existingRefs.slice(i, i + CHUNK).forEach(ref => batch.delete(ref));
-    await batch.commit();
-  }
-  // ── Step 2：分批寫入新資料 ──
-  for (let i = 0; i < items.length; i += CHUNK) {
-    const batch = db.batch();
-    items.slice(i, i + CHUNK).forEach(item => {
-      batch.set(db.collection(col).doc(item.id), item);
+    part.forEach(op => {
+      const ref = db.collection(col).doc(op.id);
+      if (op.type === 'set') batch.set(ref, op.it); else batch.delete(ref);
     });
     await batch.commit();
+    part.forEach(op => { if (op.type === 'set') m.set(op.id, op.s); else m.delete(op.id); });
   }
   hint('已同步雲端 ✓');
 }
@@ -618,11 +641,21 @@ let _dirtySigninKeys = new Set(); // 追蹤本次有變動的 signin key，避�
 
 
 // ── Save helpers ─────────────────────────────────────
-async function saveCol(col,arr){ try { await fsSave(col,arr); } catch(e){ console.warn('saveCol error:',e); } }
+let _saveErrShown = 0;
+async function saveCol(col,arr){
+  try { await fsSave(col,arr); }
+  catch(e){
+    console.warn('saveCol error:',col,e);
+    const el=document.getElementById('db-st');
+    if(el){el.textContent='⚠ 儲存失敗';el.style.background='#FCEBEB';el.style.color='#501313';el.style.borderColor='#F09595';}
+    if(Date.now()-_saveErrShown>30000){ _saveErrShown=Date.now(); alert('資料儲存失敗（'+col+'），請檢查網路連線後重新整理頁面再操作。\n錯誤：'+(e&&e.message||e)); }
+  }
+}
 
 
 // ── Core helpers ─────────────────────────────────────
-function today(){return new Date().toISOString().slice(0,10);}
+// ── ⑪ 取「今天」改用台灣當地日期（原本用國際標準時間，早上 8 點前會變成前一天）──
+function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function fmtD(d){return d?d.slice(2).replace(/-/g,'/'):'—';}
 function addWeeks(d,n){const dt=new Date(d);dt.setDate(dt.getDate()+n*7);return dt.toISOString().slice(0,10);}
 function getStudentAge(st) {
@@ -652,14 +685,16 @@ function termProgress(t){const s=new Date(t.startDate),e=new Date(t.endDate),n=n
 function sessEnrolledTotal(sid){return terms.reduce((a,t)=>a+getEnrolled(t.id,sid).length,0);}
 function getSessPrice(sid){const p=pricing.find(x=>x.sessId===sid);return p?p.price:null;}
 function feeStatus(f){
-  if(f.status==='refunded')return{cls:'pill-gray',label:'已退費',paid:0,net:f.amount,bal:0,pct:100,refunded:true};
-  const paid=txns.filter(t=>t.feeId===f.id&&t.type==='pay').reduce((a,b)=>a+b.amount,0);
+  const refund=txns.filter(t=>t.feeId===f.id&&t.type==='refund').reduce((a,b)=>a+b.amount,0);
+  if(f.status==='refunded')return{cls:'pill-gray',label:'已退費',paid:0,net:f.amount,bal:0,pct:100,refunded:true,refund};
+  const payIn=txns.filter(t=>t.feeId===f.id&&t.type==='pay').reduce((a,b)=>a+b.amount,0);
   const disc=txns.filter(t=>t.feeId===f.id&&t.type==='disc').reduce((a,b)=>a+b.amount,0);
-  const net=f.amount-disc,bal=net-paid;
-  if(bal<=0)return{cls:'pill-green',label:'已繳清',paid,net,bal:0,pct:100};
-  if(paid>0)return{cls:'pill-amber',label:'部分繳',paid,net,bal,pct:Math.round(paid/net*100)};
-  if(f.dueDate&&f.dueDate<today())return{cls:'pill-red',label:'逾期',paid,net,bal,pct:0};
-  return{cls:'pill-blue',label:'待繳',paid,net,bal,pct:0};
+  // 部分退費：退掉的金額同時從「已繳」與「應繳」扣除，帳單繼續有效
+  const paid=payIn-refund, net=f.amount-disc-refund, bal=net-paid;
+  if(bal<=0)return{cls:'pill-green',label:'已繳清',paid,net,bal:0,pct:100,refund};
+  if(paid>0)return{cls:'pill-amber',label:'部分繳',paid,net,bal,pct:Math.round(paid/net*100),refund};
+  if(f.dueDate&&f.dueDate<today())return{cls:'pill-red',label:'逾期',paid,net,bal,pct:0,refund};
+  return{cls:'pill-blue',label:'待繳',paid,net,bal,pct:0,refund};
 }
 function enrollBar(e,c,w=0){const p=Math.min(100,Math.round(e/c*100));const f=e>=c;const bc=f?'var(--red)':p>=80?'var(--amber)':'var(--green)';return`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><div class="cap-bar-wrap"><div class="cap-bar" style="width:${p}%;background:${bc}"></div></div><span class="enroll-chip ${f?'ec-full':'ec-enrolled'}">${e}/${c} 人</span>${w?`<span class="enroll-chip ec-wait">候補 ${w}</span>`:''}</div>`;}
 
@@ -688,15 +723,19 @@ function renderDash(){
   // Use coach color if set, else fall back to type color
   const getSessColor = s => { const co=coaches.find(c=>c.name===s.coach); return (co&&co.color)||typeColor[s.type]||'#555'; };
 
+  // 只顯示尚未結束期別中的班次（可切換顯示全部），停用班次不顯示
+  const curTerms = terms.filter(t=>termStatus(t).key!=='ended');
+  const curIds = new Set(curTerms.flatMap(t=>t.sessions||[]));
+  const dashSessions = sessions.filter(s=>s.status!=='inactive'&&(dashShowAll||curIds.has(s.id)));
   // Group sessions by venue
-  const venues2 = [...new Set(sessions.map(s=>s.venueId))].map(vid=>getVenue(vid)||{id:vid,name:'其他',color:'#888',shortName:'?'});
+  const venues2 = [...new Set(dashSessions.map(s=>s.venueId))].map(vid=>getVenue(vid)||{id:vid,name:'其他',color:'#888',shortName:'?'});
 
   // Collect all time slots across all sessions
-  const allTimes = [...new Set(sessions.map(s=>s.time))].sort();
+  const allTimes = [...new Set(dashSessions.map(s=>s.time))].sort();
 
   // Build timetable per venue
   const tables = venues2.map(v => {
-    const vsess = sessions.filter(s=>s.venueId===v.id);
+    const vsess = dashSessions.filter(s=>s.venueId===v.id);
     if (!vsess.length) return '';
 
     // Get unique times for this venue
@@ -713,7 +752,8 @@ function renderDash(){
         const s = vsess.find(x=>x.time===time&&x.day===day);
         if (!s) return '<td style="background:#fafafa"></td>';
 
-        const cnt  = activeTerm ? getEnrolled(activeTerm.id,s.id).length : 0;
+        const tt   = currentTermFor(s);
+        const cnt  = tt ? getEnrolled(tt.id,s.id).length : 0;
         const cap  = s.capacity;
         const pct  = cap>0 ? Math.round(cnt/cap*100) : 0;
         const isFull = cnt>=cap;
@@ -724,18 +764,19 @@ function renderDash(){
 
         return `<td style="padding:4px;vertical-align:top">
           <div style="background:${tcolor};color:#fff;border-radius:6px;padding:5px 7px;font-size:11px;cursor:pointer;min-height:58px"
-            onclick="showSessionDetail('${s.id}','${activeTerm?activeTerm.id:''}')" style="cursor:pointer" title="點擊查看課程詳情">
+            onclick="showSessionDetail('${s.id}','${tt?tt.id:''}')" style="cursor:pointer" title="點擊查看課程詳情">
             <div style="font-weight:600;font-size:12px;margin-bottom:2px">${tname}</div>
             <div style="font-size:10px;opacity:.9;margin-bottom:3px">${s.name.replace(tname,'').trim()||s.name}</div>
             <div style="display:flex;align-items:center;gap:3px">
               <span style="background:rgba(0,0,0,.2);border-radius:4px;padding:1px 5px;font-size:9px;font-weight:500">${s.coach}</span>
             </div>
-            ${activeTerm?`<div style="margin-top:4px">
+            ${tt?`<div style="margin-top:4px">
               <div style="background:rgba(255,255,255,.25);border-radius:3px;height:4px">
                 <div style="background:${isFull?'#ff4444':'rgba(255,255,255,.9)'};width:${pct}%;height:100%;border-radius:3px;transition:width .3s"></div>
               </div>
               <div style="font-size:9px;margin-top:2px;opacity:.9">${cnt}/${cap}人</div>
             </div>`:''}
+            ${tt&&termStatus(tt).key!=='active'?`<div style="font-size:9px;margin-top:2px;opacity:.9">${tt.name.replace(/^\d{4}\s*/,'')}（${termStatus(tt).label}）</div>`:''}
             ${pr!=null?`<div style="font-size:9px;margin-top:2px;opacity:.85">NT$${pr.toLocaleString()}</div>`:''}
           </div>
         </td>`;
@@ -784,16 +825,17 @@ function renderDash(){
     </span>`
   ).join('');
 
-  const timetableHTML = sessions.length
+  const timetableHTML = dashSessions.length
     ? `<div class="card" style="padding:12px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           <span style="font-size:13px;font-weight:500">週課表</span>
-          <span style="font-size:11px;color:#999">${activeTerm?activeTerm.name:'全部班次'}</span>
+          <span style="font-size:11px;color:#999">${dashShowAll?'全部開課中班次':(curTerms.map(t=>t.name).join('、')||'無進行中期別')}</span>
+          <button class="chip ${dashShowAll?'on':''}" onclick="dashShowAll=!dashShowAll;renderDash()">${dashShowAll?'只看本期':'顯示全部班次'}</button>
           <div style="margin-left:auto">${legend}</div>
         </div>
         ${tables}
       </div>`
-    : '<div class="card"><div class="empty">尚未建立班次，請至「課程」頁新增</div></div>';
+    : (sessions.length?`<div class="card"><div class="empty">目前沒有進行中或即將開課的期別班次 <button class="chip" onclick="dashShowAll=true;renderDash()">顯示全部班次</button></div></div>`:'<div class="card"><div class="empty">尚未建立班次，請至「課程」頁新增</div></div>');
 
   document.getElementById('dash-body').innerHTML = timetableHTML +
     `<div style="margin-top:12px"><div class="card">
@@ -847,8 +889,8 @@ function openSessionRuns(sessId) {
     const enrolled = getEnrolled(t.id, sessId);
     const wait     = getWait(t.id, sessId);
     const sd       = (t.sessionDates||{})[sessId] || {};
-    const sDate    = s.startDate || sd.start || t.startDate;
-    const eDate    = s.endDate   || sd.end   || t.endDate;
+    const sDate    = sd.start || t.startDate;
+    const eDate    = sd.end   || t.endDate;
     const st       = termStatus(t);
     const termFees = fees.filter(f => f.termId === t.id && enrolled.some(e => e.studentId === f.studentId));
     const totalBilled = termFees.reduce((a,f) => a+f.amount, 0);
@@ -897,7 +939,6 @@ function openSessionRuns(sessId) {
       <div><div style="font-size:10px;color:#999">滿班人數</div><div style="font-size:13px;font-weight:500">${s.capacity} 人</div></div>
       <div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:13px;font-weight:500">${s.periodLessons} 堂</div></div>
       ${pr!=null?`<div><div style="font-size:10px;color:#999">學費</div><div style="font-size:13px;font-weight:500;color:#27500A">${fmt(pr)}</div></div>`:''}
-      ${s.startDate?`<div><div style="font-size:10px;color:#999">本期日期</div><div style="font-size:12px;font-weight:500;color:#378ADD">${fmtD(s.startDate)}—${fmtD(s.endDate||s.startDate)}</div></div>`:''}
     </div>
     <div style="font-size:12px;font-weight:500;margin-bottom:8px">開課記錄（${sessTerms.length} 期）</div>
     ${runsHTML}
@@ -910,22 +951,40 @@ function openSessionRuns(sessId) {
 
 function renderSessions(){
   const vOpts=['all',...venues.map(v=>v.id)];
-  document.getElementById('track-tabs').innerHTML=vOpts.map(id=>`<button class="chip ${sessVenueFilter===id?'on':''}" onclick="sessVenueFilter='${id}';renderSessions()">${id==='all'?'全部場地':(getVenue(id)?.shortName||id)}</button>`).join('');
-  let list=[...sessions];if(sessVenueFilter!=='all')list=list.filter(s=>s.venueId===sessVenueFilter);
-  // Sort: newest first (by id = creation time), then by venue+day
-  list.sort((a,b)=>b.id.localeCompare(a.id));
-  document.getElementById('sess-grid').innerHTML=list.length?list.map(s=>{const v=getVenue(s.venueId);const totalE=sessEnrolledTotal(s.id);const pct=Math.min(100,Math.round(totalE/s.capacity*100));const pr=getSessPrice(s.id);return`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:6px${v?`;border-top:2px solid ${v.color}`:''}"><div style="display:flex;align-items:center;gap:6px"><span class="badge ${s.type}">${tLabel(s.type)}</span><div style="font-size:13px;font-weight:500;flex:1">${s.name}</div>${v?`<span style="font-size:9px;padding:1px 5px;border-radius:4px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}</div><div style="font-size:11px;color:#999"><div style="display:flex;gap:10px;margin-bottom:2px;flex-wrap:wrap"><span>${s.day} ${s.time}</span>${s.startDate?`<span style="color:#378ADD;font-size:10px">${fmtD(s.startDate)}—${fmtD(s.endDate||s.startDate)}</span>`:''}<span style="color:#27500A;font-weight:500">${s.periodLessons} 堂/期</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div><div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">${(()=>{const co=coaches.find(c=>c.name===s.coach)||{};return`<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:18px;height:18px;border-radius:50%;background:${co.color||'#aaa'}30;color:${co.color||'#666'};font-size:9px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${(s.coach||'?')[0]}</span><span style="font-size:11px;color:#555;font-weight:500">${s.coach||'未指定'}</span></span>`;})()}</div><div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px"><span style="font-size:10px">報名</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div></div></div><div style="display:flex;gap:5px"><button class="btn btn-blue" style="font-size:11px;padding:3px 9px;background:#E6F1FB;color:#0C447C;border-color:#378ADD" onclick="openSessionRuns('${s.id}')">📋 開課管理</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div></div>`;}).join(''):'<div class="empty" style="grid-column:1/-1">沒有課程</div>';}
+  const inactiveN=sessions.filter(s=>s.status==='inactive').length;
+  const idleN=sessions.filter(s=>s.status!=='inactive'&&!currentTermsOf(s).length).length;
+  document.getElementById('track-tabs').innerHTML=vOpts.map(id=>`<button class="chip ${sessVenueFilter===id?'on':''}" onclick="sessVenueFilter='${id}';renderSessions()">${id==='all'?'全部場地':(getVenue(id)?.shortName||id)}</button>`).join('')
+    +(inactiveN?`<button class="chip ${sessShowInactive?'on':''}" style="margin-left:6px" onclick="sessShowInactive=!sessShowInactive;renderSessions()">${sessShowInactive?'隱藏':'顯示'}已停用（${inactiveN}）</button>`:'')
+    +(idleN?`<button class="chip" style="margin-left:6px;color:#BA7517;border-color:#FAC775" onclick="tidyIdleSessions()" title="停用沒有排入任何進行中或未來期別的班次">🧹 整理閒置班次（${idleN}）</button>`:'');
+  let list=[...sessions];
+  if(sessVenueFilter!=='all')list=list.filter(s=>s.venueId===sessVenueFilter);
+  if(!sessShowInactive)list=list.filter(s=>s.status!=='inactive');
+  // 排序：開課中在前，再依星期、時間
+  list.sort((a,b)=>(a.status==='inactive')-(b.status==='inactive')||(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)||(a.time||'').localeCompare(b.time||''));
+  document.getElementById('sess-grid').innerHTML=list.length?list.map(s=>{
+    const v=getVenue(s.venueId);const off=s.status==='inactive';
+    const ct=currentTermFor(s);
+    const totalE=ct?getEnrolled(ct.id,s.id).length:0;
+    const pct=Math.min(100,Math.round(totalE/s.capacity*100));const pr=getSessPrice(s.id);
+    const co=coaches.find(c=>c.name===s.coach)||{};
+    return`<div style="background:${off?'#fafafa':'#fff'};border:0.5px solid #e0e0e0;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:6px;${off?'opacity:.7;':''}${v?`border-top:2px solid ${off?'#ccc':v.color}`:''}">
+      <div style="display:flex;align-items:center;gap:6px"><span class="badge ${s.type}">${tLabel(s.type)}</span><div style="font-size:13px;font-weight:500;flex:1">${s.name}</div>${off?'<span class="pill pill-gray" style="font-size:10px">已停用</span>':''}${v?`<span style="font-size:9px;padding:1px 5px;border-radius:4px;color:#fff;background:${v.color}">${v.shortName}</span>`:''}</div>
+      <div style="font-size:11px;color:#999">
+        <div style="display:flex;gap:10px;margin-bottom:2px;flex-wrap:wrap"><span>${s.day} ${s.time}</span><span style="color:#27500A;font-weight:500">${s.periodLessons} 堂/期</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</div>
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px"><span style="display:inline-flex;align-items:center;gap:3px"><span style="width:18px;height:18px;border-radius:50%;background:${co.color||'#aaa'}30;color:${co.color||'#666'};font-size:9px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${(s.coach||'?')[0]}</span><span style="font-size:11px;color:#555;font-weight:500">${s.coach||'未指定'}</span></span></div>
+        <div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px">${ct?`<span style="font-size:10px" title="${ct.name}">${ct.name.replace(/^\d{4}\s*/,'')}</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div>`:`<span style="font-size:10px;color:#aaa">目前沒有排入進行中或未來的期別 · 滿班 ${s.capacity} 人</span>`}</div>
+      </div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn btn-blue" style="font-size:11px;padding:3px 9px;background:#E6F1FB;color:#0C447C;border-color:#378ADD" onclick="openSessionRuns('${s.id}')">📋 開課管理</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="toggleSessionStatus('${s.id}')">${off?'重新啟用':'停用'}</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div>
+    </div>`;}).join(''):`<div class="empty" style="grid-column:1/-1">${sessShowInactive?'沒有課程':'沒有開課中的班次'}</div>`;
+}
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
-function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>填單人數上限 <span style="font-size:10px;color:#999;font-weight:400">（審核前最多收件數）</span></label><input type="number" id="sf-form-limit" value="${d.formLimit||d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()" placeholder="同滿班人數"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fg">
-  <div class="fr"><label>本期開始日期</label><input type="date" id="sf-start" value="${d.startDate||''}" placeholder="本期上課開始"></div>
-  <div class="fr"><label>本期結束日期</label><input type="date" id="sf-end" value="${d.endDate||''}" placeholder="本期上課結束"></div>
-</div>
+function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>填單人數上限 <span style="font-size:10px;color:#999;font-weight:400">（審核前最多收件數）</span></label><input type="number" id="sf-form-limit" value="${d.formLimit||d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()" placeholder="同滿班人數"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>班次狀態</label><select id="sf-status"><option value="active" ${d.status!=='inactive'?'selected':''}>開課中</option><option value="inactive" ${d.status==='inactive'?'selected':''}>停用（不再開課，歷史資料保留）</option></select></div><div class="info-box" style="margin-bottom:8px">📅 各期的實際上課日期，請到「期別/報名」→ 該期的「課程日期」設定，每一期分開記錄，不會互相影響。</div>
 <div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
-function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,formLimit:parseInt(document.getElementById('sf-form-limit')?.value)||parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,price:parseFloat(document.getElementById('sf-price').value)||null,startDate:document.getElementById('sf-start')?.value||null,endDate:document.getElementById('sf-end')?.value||null};}
+function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,formLimit:parseInt(document.getElementById('sf-form-limit')?.value)||parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,status:document.getElementById('sf-status')?.value||'active',price:parseFloat(document.getElementById('sf-price').value)||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
-async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0)sessions[i]={...sessions[i],...d};if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}else{// ③ 定價清空時刪除舊的 pricing，避免開帳單帶入舊金額
+async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0){sessions[i]={...sessions[i],...d};delete sessions[i].startDate;delete sessions[i].endDate;}if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}else{// ③ 定價清空時刪除舊的 pricing，避免開帳單帶入舊金額
 const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0){pricing.splice(pi,1);await saveCol('pricing',pricing);}}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function deleteSession(id){const s=getSess(id);if(!s)return;if(!confirm(`確認刪除「${s.name}」？`))return;sessions=sessions.filter(x=>x.id!==id);terms=terms.map(t=>({...t,sessions:(t.sessions||[]).filter(sid=>sid!==id)}));enrolls=enrolls.filter(e=>e.sessionId!==id);pricing=pricing.filter(p=>p.sessId!==id);await saveCol('sessions',sessions);await saveCol('terms',terms);await saveCol('enrolls',enrolls);await saveCol('pricing',pricing);closeMod();renderSessions();}
 
@@ -934,12 +993,44 @@ async function deleteSession(id){const s=getSess(id);if(!s)return;if(!confirm(`�
 function openAddTerm(){renderTermForm(null,{name:`2026 第${terms.length+1}期`,startDate:'',endDate:'',enrollStartDate:'',enrollEndDate:'',preRegStartDate:'',sessions:[],note:''});}
 function openEditTerm(id){const t=terms.find(x=>x.id===id);if(t)renderTermForm(id,t);}
 function cloneTerm(id){const t=terms.find(x=>x.id===id);if(!t)return;const wks=Math.round((new Date(t.endDate)-new Date(t.startDate))/(7*86400000))+1;const ns=addWeeks(t.endDate,1),ne=addWeeks(ns,wks-1);const gap=t.enrollStartDate?Math.round((new Date(t.startDate)-new Date(t.enrollStartDate))/(7*86400000)):4;renderTermForm(null,{name:t.name.replace(/第(\d+)期/,(_,n)=>`第${+n+1}期`),startDate:ns,endDate:ne,enrollStartDate:addWeeks(ns,-gap),enrollEndDate:addWeeks(ns,-1),preRegStartDate:addWeeks(ns,-gap-4),sessions:[...t.sessions],note:''});}
-function renderTermForm(editId,d){document.getElementById('mod-title').textContent=editId?'編輯期別':'新增期別';const vG={};sessions.forEach(s=>{const k=s.venueId||'none';if(!vG[k])vG[k]=[];vG[k].push(s);});const opts=Object.entries(vG).map(([vid,sl])=>{const v=getVenue(vid);return`<div style="font-size:10px;font-weight:500;color:#888;padding:5px 0 2px${v?`;border-left:2px solid ${v.color};padding-left:5px`:''}"}>${v?v.name:'未指定'}</div>`+sl.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const pr=getSessPrice(s.id);return`<div style="display:flex;align-items:center;gap:7px;padding:3px 0;border-bottom:0.5px solid #e0e0e0"><input type="checkbox" id="sc-${s.id}" value="${s.id}" ${d.sessions&&d.sessions.includes(s.id)?'checked':''} style="width:auto"><label for="sc-${s.id}" style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:0;flex:1"><span class="badge ${s.type}">${tLabel(s.type)}</span><span style="font-size:11px">${s.name} · ${s.day} ${s.time}</span><span style="font-size:10px;color:#27500A;margin-left:auto">${s.periodLessons}堂</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</label></div>`;}).join('');}).join('');document.getElementById('mod-body').innerHTML=`<div class="fr"><label>期別名稱 *</label><input type="text" id="tf-name" value="${d.name||''}"></div><div class="fg"><div class="fr"><label>開班日期 *</label><input type="date" id="tf-s" value="${d.startDate||''}" onchange="tfCalc()"></div><div class="fr"><label>結束日期 *</label><input type="date" id="tf-e" value="${d.endDate||''}" onchange="tfCalc()"></div></div><div id="tf-hint" style="font-size:11px;color:#999;margin-bottom:6px"></div><div class="fg"><div class="fr"><label>報名開始</label><input type="date" id="tf-es" value="${d.enrollStartDate||''}"></div><div class="fr"><label>報名截止</label><input type="date" id="tf-ee" value="${d.enrollEndDate||''}"></div></div><div class="fr"><label>預報名開放日</label><input type="date" id="tf-pre" value="${d.preRegStartDate||''}"></div><div class="fr"><label>備註</label><input type="text" id="tf-note" value="${d.note||''}"></div><div style="font-size:12px;font-weight:500;margin-bottom:4px">本期班次</div><div style="max-height:200px;overflow-y:auto;border:0.5px solid #e0e0e0;border-radius:8px;padding:4px 8px;margin-bottom:9px">${opts||'<div class="empty">尚無班次</div>'}</div><button class="btn btn-pink" style="width:100%" onclick="${editId?`saveTerm('${editId}')`:'createTerm()'}">${editId?'儲存':'確認新增'}</button>`;tfCalc();document.getElementById('overlay').style.display='flex';}
+function renderTermForm(editId,d){document.getElementById('mod-title').textContent=editId?'編輯期別':'新增期別';const vG={};sessions.filter(s=>s.status!=='inactive'||(d.sessions||[]).includes(s.id)).forEach(s=>{const k=s.venueId||'none';if(!vG[k])vG[k]=[];vG[k].push(s);});const opts=Object.entries(vG).map(([vid,sl])=>{const v=getVenue(vid);return`<div style="font-size:10px;font-weight:500;color:#888;padding:5px 0 2px${v?`;border-left:2px solid ${v.color};padding-left:5px`:''}"}>${v?v.name:'未指定'}</div>`+sl.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const pr=getSessPrice(s.id);return`<div style="display:flex;align-items:center;gap:7px;padding:3px 0;border-bottom:0.5px solid #e0e0e0"><input type="checkbox" id="sc-${s.id}" value="${s.id}" ${d.sessions&&d.sessions.includes(s.id)?'checked':''} style="width:auto"><label for="sc-${s.id}" style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-bottom:0;flex:1"><span class="badge ${s.type}">${tLabel(s.type)}</span><span style="font-size:11px">${s.name} · ${s.day} ${s.time}</span><span style="font-size:10px;color:#27500A;margin-left:auto">${s.periodLessons}堂</span>${pr!=null?`<span class="fee-tag">${fmt(pr)}</span>`:''}</label></div>`;}).join('');}).join('');document.getElementById('mod-body').innerHTML=`<div class="fr"><label>期別名稱 *</label><input type="text" id="tf-name" value="${d.name||''}"></div><div class="fg"><div class="fr"><label>開班日期 *</label><input type="date" id="tf-s" value="${d.startDate||''}" onchange="tfCalc()"></div><div class="fr"><label>結束日期 *</label><input type="date" id="tf-e" value="${d.endDate||''}" onchange="tfCalc()"></div></div><div id="tf-hint" style="font-size:11px;color:#999;margin-bottom:6px"></div><div class="fg"><div class="fr"><label>報名開始</label><input type="date" id="tf-es" value="${d.enrollStartDate||''}"></div><div class="fr"><label>報名截止</label><input type="date" id="tf-ee" value="${d.enrollEndDate||''}"></div></div><div class="fr"><label>預報名開放日</label><input type="date" id="tf-pre" value="${d.preRegStartDate||''}"></div><div class="fr"><label>備註</label><input type="text" id="tf-note" value="${d.note||''}"></div><div style="font-size:12px;font-weight:500;margin-bottom:4px">本期班次</div><div style="max-height:200px;overflow-y:auto;border:0.5px solid #e0e0e0;border-radius:8px;padding:4px 8px;margin-bottom:9px">${opts||'<div class="empty">尚無班次</div>'}</div><button class="btn btn-pink" style="width:100%" onclick="${editId?`saveTerm('${editId}')`:'createTerm()'}">${editId?'儲存':'確認新增'}</button>`;tfCalc();document.getElementById('overlay').style.display='flex';}
 function tfCalc(){const s=document.getElementById('tf-s').value,e=document.getElementById('tf-e').value;if(s&&e){const w=Math.round((new Date(e)-new Date(s))/(7*86400000));document.getElementById('tf-hint').textContent=`共 ${w} 週`;}}
 function getTfData(){return{name:document.getElementById('tf-name').value.trim(),startDate:document.getElementById('tf-s').value,endDate:document.getElementById('tf-e').value,enrollStartDate:document.getElementById('tf-es').value,enrollEndDate:document.getElementById('tf-ee').value,preRegStartDate:document.getElementById('tf-pre').value,sessions:Array.from(document.querySelectorAll('[id^="sc-"]:checked')).map(c=>c.value),note:document.getElementById('tf-note').value};}
 async function createTerm(){const d=getTfData();if(!d.name||!d.startDate){alert('請填寫名稱與日期');return;}terms.push({id:'t'+Date.now(),...d,color:VENUE_COLORS[terms.length%VENUE_COLORS.length]});await saveCol('terms',terms);closeMod();renderTerms();renderDash();buildFeTermFilter();}
 async function saveTerm(id){const d=getTfData();if(!d.name||!d.startDate){alert('請填寫名稱與日期');return;}const i=terms.findIndex(t=>t.id===id);if(i>=0)terms[i]={...terms[i],...d};await saveCol('terms',terms);closeMod();renderTerms();renderDash();}
-async function deleteTerm(id){if(!confirm('確認刪除此期別？'))return;terms=terms.filter(t=>t.id!==id);enrolls=enrolls.filter(e=>e.termId!==id);await saveCol('terms',terms);await saveCol('enrolls',enrolls);renderTerms();renderDash();}
+async function deleteTerm(id){
+  const t=terms.find(x=>x.id===id); if(!t) return;
+  const tEnrolls=enrolls.filter(e=>e.termId===id);
+  const tFees=fees.filter(f=>f.termId===id);
+  const feeIds=new Set(tFees.map(f=>f.id));
+  const tTxns=txns.filter(x=>feeIds.has(x.feeId));
+  const paidSum=tTxns.filter(x=>x.type==='pay').reduce((a,x)=>a+x.amount,0);
+  const tMk=makeupRec.filter(m=>m.termId===id);
+  const tPend=pendingSubs.filter(p=>p.termId===id);
+  const parts=[];
+  if(tEnrolls.length) parts.push(`報名紀錄 ${tEnrolls.length} 筆`);
+  if(tFees.length) parts.push(`本期帳單 ${tFees.length} 張`);
+  if(tTxns.length) parts.push(`收款／折扣／退費紀錄 ${tTxns.length} 筆`);
+  if(tMk.length) parts.push(`補課紀錄 ${tMk.length} 筆`);
+  if(tPend.length) parts.push(`家長報名表 ${tPend.length} 筆`);
+  let msg=`確認刪除期別「${t.name}」？`;
+  if(parts.length) msg+=`\n\n以下資料會一併刪除：\n・${parts.join('\n・')}`;
+  if(paidSum>0) msg+=`\n\n⚠ 本期已收款 ${fmt(paidSum)}，刪除後收款統計與報表會少掉這些金額。\n已結束的期別建議保留，不需刪除（列表預設就不會顯示已結束期別）。`;
+  msg+='\n\n學生資料與簽到紀錄會保留。刪除後無法復原。';
+  if(!confirm(msg)) return;
+  terms=terms.filter(x=>x.id!==id);
+  enrolls=enrolls.filter(e=>e.termId!==id);
+  fees=fees.filter(f=>f.termId!==id);
+  txns=txns.filter(x=>!feeIds.has(x.feeId));
+  makeupRec=makeupRec.filter(m=>m.termId!==id);
+  pendingSubs=pendingSubs.filter(p=>p.termId!==id);
+  showLoading('刪除中…');
+  await saveCol('terms',terms); await saveCol('enrolls',enrolls); await saveCol('fees',fees);
+  await saveCol('txns',txns); await saveCol('makeup',makeupRec); await saveCol('pending',pendingSubs);
+  hideLoading();
+  renderTerms(); renderDash(); buildFeTermFilter();
+  hint('期別已刪除 ✓');
+}
 // ══════════════════════════════════════════════════════
 // 可編輯報名名單（取代原本的 openTermRoster 與 removeEnroll）
 // ══════════════════════════════════════════════════════
@@ -1280,9 +1371,50 @@ async function rosterSaveStudent(stId, termId) {
   rosterRefresh(termId); renderStudents();
   hint('學生資料已更新 ✓');
 }
-function openAddEnroll(termId){const t=terms.find(x=>x.id===termId);if(!t)return;const so=sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)).sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const cnt=getEnrolled(t.id,s.id).length;const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" data-price="${pr||''}">${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name}（${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''}${cnt>=s.capacity?' ⚠滿':''}）</option>`;}).join('');const stu=students.map(s=>`<option value="${s.id}">${s.name}${s.ageY||s.ageM?' ('+fmtAge(s.ageY,s.ageM)+')':''}</option>`).join('');document.getElementById('mod-title').textContent='新增報名 — '+t.name;document.getElementById('mod-body').innerHTML=`<div class="info-box">${t.name} · 開班：${fmtD(t.startDate)} · 結束：${fmtD(t.endDate)}</div><div class="fr"><label>學生</label>${students.length?`<select id="ae-stu">${stu}</select>`:`<input type="text" id="ae-stuname" placeholder="學生姓名（新生）">`}</div><div class="fr"><label>課程（含學費）</label><select id="ae-sess" onchange="aeInfo()">${so}</select></div><div id="ae-info-box" style="background:#EAF3DE;border-radius:8px;padding:7px 10px;font-size:11px;color:#27500A;margin-bottom:8px"></div><div class="fg"><div class="fr"><label>狀態</label><select id="ae-status"><option value="enrolled">正取</option><option value="waitlist">候補</option><option value="preregister">預報名</option></select></div><div class="fr"><label>報名日期</label><input type="date" id="ae-date" value="${today()}"></div></div><button class="btn btn-pink" style="width:100%" onclick="addEnroll('${termId}')">確認報名</button>`;document.getElementById('overlay').style.display='flex';aeInfo();}
+// ⑦ 期別卡片「+ 報名」：可直接輸入新生（會建立學生資料）、防止重複報名、正取自動開帳
+function openAddEnroll(termId){
+  const t=terms.find(x=>x.id===termId);if(!t)return;
+  const so=sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)).sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const cnt=getEnrolled(t.id,s.id).length;const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" data-price="${pr||''}">${v?'['+v.shortName+'] ':''}${s.day} ${s.time} — ${s.name}（${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''}${cnt>=s.capacity?' ⚠滿':''}）</option>`;}).join('');
+  const stu=[...students].sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-Hant')).map(s=>`<option value="${s.id}">${s.name}${s.parent?'（'+s.parent+'）':''}</option>`).join('');
+  document.getElementById('mod-title').textContent='新增報名 — '+t.name;
+  document.getElementById('mod-body').innerHTML=`<div class="info-box">${t.name} · 開班：${fmtD(t.startDate)} · 結束：${fmtD(t.endDate)}</div>
+  <div class="fr"><label>選擇既有學生</label><select id="ae-stu"><option value="">— 選擇學生 —</option>${stu}</select></div>
+  <div style="font-size:11px;color:#999;margin:-2px 0 6px">或新增學生（名單中沒有時）</div>
+  <div class="fg"><div class="fr"><label>新學生姓名</label><input type="text" id="ae-stuname" placeholder="孩子姓名"></div><div class="fr"><label>家長電話</label><input type="tel" id="ae-phone" placeholder="選填"></div></div>
+  <div class="fr"><label>課程（含學費）</label><select id="ae-sess" onchange="aeInfo()">${so}</select></div>
+  <div id="ae-info-box" style="background:#EAF3DE;border-radius:8px;padding:7px 10px;font-size:11px;color:#27500A;margin-bottom:8px"></div>
+  <div class="fg"><div class="fr"><label>狀態</label><select id="ae-status"><option value="enrolled">正取</option><option value="waitlist">候補</option><option value="preregister">預報名</option></select></div><div class="fr"><label>報名日期</label><input type="date" id="ae-date" value="${today()}"></div></div>
+  <button class="btn btn-pink" style="width:100%" onclick="addEnroll('${termId}')">確認報名</button>`;
+  document.getElementById('overlay').style.display='flex';aeInfo();
+}
 function aeInfo(){const sel=document.getElementById('ae-sess');if(!sel)return;const opt=sel.options[sel.selectedIndex];const lessons=opt?.dataset.lessons;const price=opt?.dataset.price;const el=document.getElementById('ae-info-box');if(el)el.innerHTML=`${lessons?`<span>每期堂數：<strong>${lessons} 堂</strong></span>&nbsp;&nbsp;`:''}${price?`<span>課程學費：<strong>${fmt(parseInt(price))}</strong></span>`:'<span style="color:#999">此課程尚未設定學費</span>'}`;}
-async function addEnroll(termId){const sessId=document.getElementById('ae-sess').value;const status=document.getElementById('ae-status').value;let studentId='',studentName='';const se=document.getElementById('ae-stu'),sn=document.getElementById('ae-stuname');if(se)studentId=se.value;else if(sn)studentName=sn.value.trim();if(!studentId&&!studentName){alert('請選擇或輸入學生');return;}const s=getSess(sessId);if(status==='enrolled'&&s){const cnt=getEnrolled(termId,sessId).length;if(cnt>=s.capacity&&!confirm('班次已滿，改為候補？'))return;}enrolls.push({id:'e'+Date.now(),termId,sessionId:sessId,studentId,studentName,status,enrollDate:document.getElementById('ae-date').value,createdAt:today()});await saveCol('enrolls',enrolls);closeMod();renderTerms();renderDash();}
+async function addEnroll(termId){
+  const sessId=document.getElementById('ae-sess').value;
+  let status=document.getElementById('ae-status').value;
+  let studentId=document.getElementById('ae-stu')?.value||'';
+  const newName=(document.getElementById('ae-stuname')?.value||'').trim();
+  if(!sessId){alert('請選擇課程');return;}
+  if(!studentId&&!newName){alert('請選擇學生或輸入新學生姓名');return;}
+  const s=getSess(sessId);
+  if(!studentId){
+    const phone=(document.getElementById('ae-phone')?.value||'').trim();
+    const dup=findExistingStudent(newName,phone);
+    if(dup&&confirm(`系統中已有學生「${dup.name}」${dup.phone?'（'+dup.phone+'）':''}，是否直接使用這位學生？\n選「取消」會另外建立新學生。`)){ studentId=dup.id; }
+    else{
+      const st={id:'s'+Date.now(),name:newName,phone,parent:'',lineId:'',gender:'',ageY:0,ageM:0,height:0,period:s?.periodLessons||6,attended:0,leaves:0,makeups:0,leaveMax:2,startDate:today()};
+      students.push(st);studentId=st.id;await saveCol('students',students);
+    }
+  }
+  if(enrolls.some(e=>e.termId===termId&&e.sessionId===sessId&&e.studentId===studentId)){alert('此學生已報名這個班次');return;}
+  if(status==='enrolled'&&s&&getEnrolled(termId,sessId).length>=s.capacity){
+    if(confirm('班次已滿，改為候補？\n選「取消」則仍列為正取（超收）。')) status='waitlist';
+  }
+  enrolls.push({id:'e'+Date.now()+Math.random().toString(36).slice(2,6),termId,sessionId:sessId,studentId,status,enrollDate:document.getElementById('ae-date').value||today(),createdAt:today()});
+  await saveCol('enrolls',enrolls);
+  const fee=status==='enrolled'?await autoCreateFeeAfterEnroll(studentId,sessId,termId):null;
+  closeMod();renderTerms();renderDash();renderStudents();renderFee();
+  hint(fee?'報名成功，帳單已自動建立 ✓':'報名成功 ✓');
+}
 
 // ── SIGNIN ───────────────────────────────────────────
 
@@ -1482,20 +1614,22 @@ function renderFee(){
   else list = ws.map(({f}) => f);
   // ti/tw: based on filtered list; tp/tr: all time (for comparison)
   const ti = list.filter(f => f.status !== 'refunded').reduce((a, f) => a + f.amount, 0);
-  const tp = txns.filter(t => t.type === 'pay').reduce((a, t) => a + t.amount, 0);
+  const tp = txns.filter(t => t.type === 'pay').reduce((a, t) => a + t.amount, 0) - txns.filter(t => t.type === 'refund').reduce((a, t) => a + t.amount, 0);
   const tw = list.filter(f => f.status !== 'refunded').reduce((a, f) => a + feeStatus(f).bal, 0);
-  const tr = list.filter(f => f.status === 'refunded').reduce((a, f) => a + f.amount, 0);
+  const listIds = new Set(list.map(f => f.id));
+  const tr = txns.filter(t => t.type === 'refund' && listIds.has(t.feeId)).reduce((a, t) => a + t.amount, 0);
   // Month filter label
   const mf = document.getElementById('fee-month-filter');
   const mfVal = mf ? mf.value : '';
   const mfLabel = mfVal ? mfVal+'月份' : '全部期間';
   // Paid in period (by payment date)
-  const tpPeriod = txns.filter(t => t.type==='pay' && (!mfVal || (t.date||'').startsWith(mfVal))).reduce((a,t)=>a+t.amount,0);
+  const inPeriod = t => !mfVal || (t.date||'').startsWith(mfVal);
+  const tpPeriod = txns.filter(t => t.type==='pay' && inPeriod(t)).reduce((a,t)=>a+t.amount,0) - txns.filter(t => t.type==='refund' && inPeriod(t)).reduce((a,t)=>a+t.amount,0);
   const metricsEl = document.getElementById('fee-metrics');
   if(metricsEl) metricsEl.innerHTML = `
     <div class="mc"><div class="mc-lbl">開帳金額（${mfLabel}）</div><div class="mc-val">${fmt(ti)}</div></div>
-    <div class="mc"><div class="mc-lbl">實收金額（${mfLabel}）</div><div class="mc-val" style="color:#27500A">${fmt(tpPeriod)}</div></div>
-    <div class="mc"><div class="mc-lbl">累計總收款</div><div class="mc-val" style="color:#27500A">${fmt(tp)}</div></div>
+    <div class="mc"><div class="mc-lbl">實收金額（${mfLabel}，已扣退費）</div><div class="mc-val" style="color:#27500A">${fmt(tpPeriod)}</div></div>
+    <div class="mc"><div class="mc-lbl">累計總收款（已扣退費）</div><div class="mc-val" style="color:#27500A">${fmt(tp)}</div></div>
     <div class="mc"><div class="mc-lbl">未收款</div><div class="mc-val" style="color:${tw>0?'#A32D2D':'inherit'}">${fmt(tw)}</div></div>
     <div class="mc"><div class="mc-lbl">退費合計</div><div class="mc-val" style="color:${tr>0?'#A32D2D':'inherit'}">${fmt(tr)}</div></div>`;
   if(feeSub === 'ledger')  { renderLedger();     return; }
@@ -1527,7 +1661,7 @@ function renderBills(list, noBillRows=[]){
       </div>
       ${!isRef?`<div class="pbar-wrap"><div class="pbar" style="width:${s.pct}%;background:${s.label==='逾期'?'var(--red)':s.pct<100?'var(--amber)':'var(--green)'}"></div></div>`:''}
       <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:4px">
-        <span style="font-size:11px;color:#999">${isRef?'退費：'+fmt(f.amount):'已繳 '+fmt(s.paid)+' / 應繳 '+fmt(s.net)}</span>
+        <span style="font-size:11px;color:#999">${isRef?'已退費 '+fmt(s.refund||0)+'（帳單已作廢）':'已繳 '+fmt(s.paid)+' / 應繳 '+fmt(s.net)+(s.refund>0?' · 已退 '+fmt(s.refund):'')}</span>
         <span style="font-size:13px;font-weight:500;margin-left:auto;color:${s.bal>0?'#A32D2D':'#888'}">${isRef?'已退費':s.bal>0?'-'+fmt(s.bal):(s.paid>s.net?'溢繳 '+fmt(s.paid-s.net)+'（需退差額）':'結清')}</span>
         ${!isRef&&s.bal>0?`<button class="btn btn-green" style="font-size:11px;padding:3px 8px" onclick="openPayMod('${f.id}')">收款</button>`:''}
         <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openFeeHist('${f.id}')">明細</button>
@@ -1538,7 +1672,12 @@ function renderBills(list, noBillRows=[]){
   }).join('');
 }
 
-function renderLedger(){const allTxns=txns.filter(t=>t.type==='pay').sort((a,b)=>b.date.localeCompare(a.date));const total=allTxns.reduce((a,t)=>a+t.amount,0);document.getElementById('fee-body').innerHTML=`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden"><table class="tbl"><colgroup><col style="width:16%"><col style="width:15%"><col style="width:28%"><col style="width:15%"><col style="width:13%"><col style="width:13%"></colgroup><thead><tr><th>日期</th><th>學生</th><th>說明</th><th>金額</th><th>方式</th><th>狀態</th></tr></thead><tbody>${allTxns.map(t=>{const f=fees.find(x=>x.id===t.feeId);const st=getSt(t.studentId);return`<tr><td>${t.date}</td><td>${st.name}</td><td>${f?f.description:'—'}</td><td style="font-weight:500;color:#27500A">${fmt(t.amount)}</td><td>${t.method||'—'}</td><td><span class="pill pill-green">已收</span></td></tr>`;}).join('')}<tr style="background:#f8f8f8"><td colspan="3" style="font-weight:500;text-align:right;padding:7px 9px">合計</td><td style="font-weight:500;color:#27500A;padding:7px 9px">${fmt(total)}</td><td colspan="2"></td></tr></tbody></table></div>`;}
+function renderLedger(){
+  const allTxns=txns.filter(t=>t.type==='pay'||t.type==='refund').sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const totalIn=allTxns.filter(t=>t.type==='pay').reduce((a,t)=>a+t.amount,0);
+  const totalOut=allTxns.filter(t=>t.type==='refund').reduce((a,t)=>a+t.amount,0);
+  document.getElementById('fee-body').innerHTML=`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden"><table class="tbl"><colgroup><col style="width:16%"><col style="width:15%"><col style="width:28%"><col style="width:15%"><col style="width:13%"><col style="width:13%"></colgroup><thead><tr><th>日期</th><th>學生</th><th>說明</th><th>金額</th><th>方式</th><th>類型</th></tr></thead><tbody>${allTxns.map(t=>{const f=fees.find(x=>x.id===t.feeId);const st=getSt(t.studentId);const isR=t.type==='refund';return`<tr><td>${t.date}</td><td>${st.name}</td><td>${f?f.description:'—'}${isR&&t.note?' · '+t.note:''}</td><td style="font-weight:500;color:${isR?'#A32D2D':'#27500A'}">${isR?'-':''}${fmt(t.amount)}</td><td>${t.method||'—'}</td><td><span class="pill ${isR?'pill-red':'pill-green'}">${isR?'退費':'已收'}</span></td></tr>`;}).join('')}<tr style="background:#f8f8f8"><td colspan="3" style="font-weight:500;text-align:right;padding:7px 9px">收款 ${fmt(totalIn)} − 退費 ${fmt(totalOut)} ＝ 淨收</td><td style="font-weight:500;color:#27500A;padding:7px 9px">${fmt(totalIn-totalOut)}</td><td colspan="2"></td></tr></tbody></table></div>`;
+}
 function renderRefundList(){const refTxns=txns.filter(t=>t.type==='refund').sort((a,b)=>b.date.localeCompare(a.date));const total=refTxns.reduce((a,t)=>a+t.amount,0);document.getElementById('fee-body').innerHTML=refTxns.length?`<div style="background:#fff;border:0.5px solid #e0e0e0;border-radius:12px;overflow:hidden"><table class="tbl"><colgroup><col style="width:16%"><col style="width:15%"><col style="width:28%"><col style="width:14%"><col style="width:27%"></colgroup><thead><tr><th>日期</th><th>學生</th><th>課程</th><th>退費金額</th><th>原因</th></tr></thead><tbody>${refTxns.map(t=>{const f=fees.find(x=>x.id===t.feeId);const st=getSt(t.studentId);return`<tr><td>${t.date}</td><td>${st.name}</td><td>${f?f.description:'—'}</td><td style="font-weight:500;color:#A32D2D">${fmt(t.amount)}</td><td style="color:#999">${t.note||'—'}</td></tr>`;}).join('')}<tr style="background:#f8f8f8"><td colspan="3" style="font-weight:500;text-align:right;padding:7px 9px">退費合計</td><td style="font-weight:500;color:#A32D2D;padding:7px 9px">${fmt(total)}</td><td></td></tr></tbody></table></div>`:'<div class="empty">尚無退費記錄</div>';}
 function renderUnpaidList(){
   const body = document.getElementById('fee-body');
@@ -1579,7 +1718,7 @@ const noBillUnpaid = [];
   const billedTermKeys = new Set(fees.map(f=>f.studentId+':'+f.termId+':'+(f.sessionId||'')));
   enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
     const key2 = e.studentId+':'+e.termId+':'+e.sessionId;
-    if (!billedTermKeys.has(key2) && !noBillUnpaid.find(r=>r.key===key2)) {
+    if (!isEnrollBilled(e) && !noBillUnpaid.find(r=>r.key===key2)) {
       const st2=getSt(e.studentId); const s2=getSess(e.sessionId); const t2=terms.find(x=>x.id===e.termId);
       const pr2=s2?getSessPrice(s2.id):null;
       noBillUnpaid.push({key:key2,name:st2.name,sessName:s2?s2.name+' '+s2.day+' '+s2.time:'—',termName:t2?t2.name:'—',price:pr2,studentId:e.studentId,termId:e.termId,sessId:e.sessionId});
@@ -1672,8 +1811,45 @@ function ifPrev(){const a=parseFloat(document.getElementById('if-amt').value)||0
 async function issueFee(){const stId=document.getElementById('if-stu').value,amt=parseFloat(document.getElementById('if-amt').value)||0,disc=parseFloat(document.getElementById('if-disc').value)||0;if(!stId||amt<=0){alert('請選擇學生並輸入金額');return;}const sessId=document.getElementById('if-sess').value||null;const termId=document.getElementById('if-term').value||null;const term=terms.find(t=>t.id===termId);const fee={id:'f'+Date.now(),studentId:stId,termId,sessionId:sessId,amount:amt,description:document.getElementById('if-note').value||'課程費用',dueDate:document.getElementById('if-due').value,issuedDate:today(),termStartDate:term?.startDate||null,termEndDate:term?.endDate||null};fees.push(fee);if(disc>0)txns.push({id:'t'+Date.now(),feeId:fee.id,studentId:stId,type:'disc',amount:disc,date:today(),method:'—',note:'開帳折扣'});await saveCol('fees',fees);await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
 function openPayMod(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);document.getElementById('mod-title').textContent='收款 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">應繳</span><span>${fmt(s.net)}</span></div><div class="rrow"><span style="color:#999">已繳</span><span style="color:#27500A">${fmt(s.paid)}</span></div><div class="rrow rtotal"><span>尚欠</span><span style="color:#A32D2D">${fmt(s.bal)}</span></div></div><div class="fg"><div class="fr"><label>收款金額</label><input type="number" id="pay-amt" value="${s.bal}" min="1"></div><div class="fr"><label>付款方式</label><select id="pay-meth"><option>現金</option><option>轉帳</option><option>LINE Pay</option><option>信用卡</option></select></div></div><div class="fg"><div class="fr"><label>日期</label><input type="date" id="pay-date" value="${today()}"></div><div class="fr"><label>備註</label><input type="text" id="pay-note"></div></div><button class="btn btn-green" style="width:100%" onclick="recordPay('${feeId}')">確認收款</button>`;document.getElementById('overlay').style.display='flex';}
 async function recordPay(feeId){const amt=parseFloat(document.getElementById('pay-amt').value)||0;if(amt<=0){alert('請輸入金額');return;}const f=fees.find(x=>x.id===feeId);txns.push({id:'t'+Date.now(),feeId,studentId:f?f.studentId:'',type:'pay',amount:amt,method:document.getElementById('pay-meth').value,date:document.getElementById('pay-date').value,note:document.getElementById('pay-note').value});await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
-function openRefundMod(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);document.getElementById('mod-title').textContent='退費 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">課程</span><span>${f.description}</span></div><div class="rrow"><span style="color:#999">已收款</span><span style="color:#27500A">${fmt(s.paid)}</span></div><div class="rrow rtotal"><span>可退款最高</span><span style="color:#A32D2D">${fmt(s.paid)}</span></div></div><div class="fg"><div class="fr"><label>退費金額 (NT$) *</label><input type="number" id="ref-amt" value="${s.paid}" min="0" step="100"></div><div class="fr"><label>退費日期</label><input type="date" id="ref-date" value="${today()}"></div></div><div class="fr"><label>退費原因 *</label><select id="ref-reason-sel" onchange="document.getElementById('ref-reason').value=this.value==='other'?'':this.value"><option value="">請選擇原因</option><option value="家長退選課程">家長退選課程</option><option value="課程取消">課程取消</option><option value="身體不適無法上課">身體不適無法上課</option><option value="搬家 / 住址異動">搬家 / 住址異動</option><option value="other">其他（自填）</option></select></div><div class="fr"><label>退費原因（詳述）</label><input type="text" id="ref-reason" placeholder="請填寫退費原因"></div><div class="info-box" style="margin-top:4px">退費後此帳單將標記為「已退費」。</div><button class="btn btn-red" style="width:100%" onclick="recordRefund('${feeId}')">確認退費</button>`;document.getElementById('overlay').style.display='flex';}
-async function recordRefund(feeId){const amt=parseFloat(document.getElementById('ref-amt').value)||0;const reason=document.getElementById('ref-reason').value.trim();if(amt<=0){alert('請輸入退費金額');return;}if(!reason){alert('請填寫退費原因');return;}const f=fees.find(x=>x.id===feeId);if(!f)return;txns.push({id:'t'+Date.now(),feeId,studentId:f.studentId,type:'refund',amount:amt,date:document.getElementById('ref-date').value,note:reason,method:'退費'});f.status='refunded';await saveCol('fees',fees);await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
+function openRefundMod(feeId){
+  const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);
+  if(s.paid<=0){alert('這張帳單尚未收款，沒有可退的金額。\n若要取消這張帳單，請直接刪除。');return;}
+  document.getElementById('mod-title').textContent='退費 — '+st.name;
+  document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">課程</span><span>${f.description}</span></div><div class="rrow"><span style="color:#999">應繳</span><span>${fmt(s.net)}</span></div>${s.refund>0?`<div class="rrow"><span style="color:#999">先前已退</span><span style="color:#A32D2D">${fmt(s.refund)}</span></div>`:''}<div class="rrow rtotal"><span>已收款（可退上限）</span><span style="color:#27500A">${fmt(s.paid)}</span></div></div>
+  <div class="fg"><div class="fr"><label>退費金額 (NT$) *</label><input type="number" id="ref-amt" value="${s.paid}" min="0" max="${s.paid}" step="100" oninput="refAutoMode(${s.paid})"></div><div class="fr"><label>退費日期</label><input type="date" id="ref-date" value="${today()}"></div></div>
+  <div class="fr"><label>退費方式</label>
+    <label style="display:flex;align-items:flex-start;gap:7px;padding:7px 9px;border:0.5px solid #e0e0e0;border-radius:8px;margin-bottom:5px;cursor:pointer"><input type="radio" name="ref-mode" value="void" checked onchange="window._refTouched=true" style="width:auto;margin-top:2px"><span><span style="font-size:12px;font-weight:500;color:#333">退費並作廢帳單</span><br><span style="font-size:11px;color:#999">學生退出這門課，帳單結案，不再收款</span></span></label>
+    <label style="display:flex;align-items:flex-start;gap:7px;padding:7px 9px;border:0.5px solid #e0e0e0;border-radius:8px;cursor:pointer"><input type="radio" name="ref-mode" value="partial" onchange="window._refTouched=true" style="width:auto;margin-top:2px"><span><span style="font-size:12px;font-weight:500;color:#333">部分退費，帳單保留</span><br><span style="font-size:11px;color:#999">例如少上幾堂退部分學費，應繳金額同步扣減，學生繼續上課</span></span></label>
+  </div>
+  <div class="fr"><label>退費原因 *</label><select id="ref-reason-sel" onchange="document.getElementById('ref-reason').value=this.value==='other'?'':this.value"><option value="">請選擇原因</option><option value="家長退選課程">家長退選課程</option><option value="課程取消">課程取消</option><option value="減少堂數">減少堂數</option><option value="身體不適無法上課">身體不適無法上課</option><option value="搬家 / 住址異動">搬家 / 住址異動</option><option value="other">其他（自填）</option></select></div>
+  <div class="fr"><label>退費原因（詳述）</label><input type="text" id="ref-reason" placeholder="請填寫退費原因"></div>
+  <button class="btn btn-red" style="width:100%" onclick="recordRefund('${feeId}')">確認退費</button>`;
+  window._refTouched=false;
+  document.getElementById('overlay').style.display='flex';
+}
+// 金額等於已收款時預設「作廢」，小於時預設「部分退費」（使用者手動選過就不再自動切換）
+function refAutoMode(paid){
+  if(window._refTouched) return;
+  const amt=parseFloat(document.getElementById('ref-amt').value)||0;
+  const v=amt>=paid?'void':'partial';
+  const r=document.querySelector(`input[name="ref-mode"][value="${v}"]`); if(r) r.checked=true;
+}
+async function recordRefund(feeId){
+  const f=fees.find(x=>x.id===feeId);if(!f)return;
+  const s=feeStatus(f);
+  const amt=parseFloat(document.getElementById('ref-amt').value)||0;
+  const reason=document.getElementById('ref-reason').value.trim();
+  const mode=document.querySelector('input[name="ref-mode"]:checked')?.value||'void';
+  if(amt<=0){alert('請輸入退費金額');return;}
+  if(amt>s.paid){alert('退費金額不能超過已收款 '+fmt(s.paid));return;}
+  if(!reason){alert('請填寫退費原因');return;}
+  if(mode==='void'&&amt<s.paid&&!confirm(`退費 ${fmt(amt)}，保留 ${fmt(s.paid-amt)} 不退，並作廢帳單？`))return;
+  txns.push({id:'t'+Date.now(),feeId,studentId:f.studentId,type:'refund',amount:amt,date:document.getElementById('ref-date').value,note:reason+(mode==='partial'?'（部分退費）':''),method:'退費'});
+  if(mode==='void') f.status='refunded';
+  await saveCol('fees',fees);await saveCol('txns',txns);
+  closeMod();renderFee();renderStudents();renderDash();
+  hint(mode==='void'?'已退費，帳單已作廢 ✓':'已部分退費，應繳金額已調整 ✓');
+}
 function openFeeHist(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);const rel=txns.filter(t=>t.feeId===feeId).sort((a,b)=>b.date.localeCompare(a.date));document.getElementById('mod-title').textContent='帳單明細 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">說明</span><span>${f.description}</span></div>${f.termStartDate?`<div class="rrow"><span style="color:#999">上課期間</span><span>${fmtD(f.termStartDate)} — ${fmtD(f.termEndDate)}</span></div>`:''}<div class="rrow rtotal"><span>餘額</span><span style="color:${s.bal>0?'#A32D2D':'#27500A'}">${s.bal>0?fmt(s.bal):'結清'}</span></div></div>${s.paid>s.net&&!f.status?`<div style="background:#FCEBEB;color:#501313;border-radius:8px;padding:7px 10px;font-size:11px;margin-bottom:8px">⚠ 換班後溢繳 ${fmt(s.paid-s.net)}，請退還差額</div>`:''}${(f.history||[]).length?`<div style="background:#E6F1FB;border-radius:8px;padding:7px 10px;font-size:11px;color:#0C447C;margin-bottom:8px"><div style="font-weight:500;margin-bottom:3px">調整紀錄</div>${f.history.map(x=>`<div>${x.date} ${x.type}：${x.from} → ${x.to}（${fmt(x.oldAmount)} → ${fmt(x.newAmount)}）</div>`).join('')}</div>`:''}${rel.map(t=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:0.5px solid #e0e0e0"><div style="flex:1"><div style="font-size:12px">${{pay:'收款',disc:'折扣',refund:'退費'}[t.type]||t.type}${t.note?' · '+t.note:''}</div><div style="font-size:10px;color:#999">${t.date} · ${t.method||'—'}</div></div><div style="font-size:13px;font-weight:500;color:${t.type==='pay'?'#27500A':'#A32D2D'}">${t.type==='pay'?'+':'-'}${fmt(t.amount)}</div></div>`).join('')||'<div class="empty">尚無交易</div>'}${s.bal>0&&!f.status?`<button class="btn btn-green" style="width:100%;margin-top:8px" onclick="closeMod();openPayMod('${feeId}')">收款</button>`:''}`;document.getElementById('overlay').style.display='flex';}
 async function deleteFee(feeId){if(!confirm('確認刪除此帳單？'))return;fees=fees.filter(f=>f.id!==feeId);txns=txns.filter(t=>t.feeId!==feeId);await saveCol('fees',fees);await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
 
@@ -1713,30 +1889,24 @@ function esFilterSess() {
 
 // Auto-create fee after enrollment
 async function autoCreateFeeAfterEnroll(stId, sessId, termId) {
-  if (!sessId || !termId) return;
+  if (!sessId || !termId) return null;
   const s = getSess(sessId);
-  if (!s) return;
-  // Skip multi sessions (they use vouchers)
-  if (s.type === 'multi') return;
-  // Skip if fee already exists for this term
-  const existing = fees.find(f => f.studentId===stId && f.termId===termId && f.status!=='refunded');
-  if (existing) return;
+  if (!s || s.type === 'multi') return null;               // 多元課程用使用券
+  if (isEnrollBilled({studentId:stId, termId, sessionId:sessId})) return null;
   const pr = getSessPrice(sessId);
-  if (!pr) return; // No price set, skip auto-create
+  if (pr == null) return null;                              // 未設定學費，不自動開帳
   const t = terms.find(x=>x.id===termId);
-  const due = t ? addWeeks(t.startDate||today(), 2) : addWeeks(today(), 14);
   const fee = {
-    id: 'f'+Date.now(),
-    studentId: stId,
-    termId,
-    sessionId: sessId,
-    amount: pr,
+    id: 'f'+Date.now()+Math.random().toString(36).slice(2,5),
+    studentId: stId, termId, sessionId: sessId, amount: pr,
     description: s.name+' '+s.day+' '+s.time,
-    dueDate: due,
+    dueDate: addWeeks((t&&t.startDate)||today(), 2),
     issuedDate: today(),
+    termStartDate: t?.startDate||null, termEndDate: t?.endDate||null
   };
   fees.push(fee);
   await saveCol('fees', fees);
+  return fee;
 }
 
 
@@ -1815,7 +1985,7 @@ async function deleteEnroll(enrollId) {
 }
 
 
-function renderStudents(){const q=(document.getElementById('stu-search').value||'').toLowerCase();
+function renderStudents(){try{updateOrphanBtn();}catch(e){}const q=(document.getElementById('stu-search').value||'').toLowerCase();
   const feeF = document.getElementById('stu-fee-filter') ? document.getElementById('stu-fee-filter').value : 'all';
   let list=students.filter(st=>{
     // Search filter
@@ -1829,7 +1999,7 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
       const nonMultiEnrolls = stEnrolls.filter(e=>getSess(e.sessionId)?.type!=='multi');
       if (!nonMultiEnrolls.length) return false; // all multi = not in no-bill list
       // ⑩ key 加入 sessionId，逐課判斷是否已開帳
-      return nonMultiEnrolls.some(e=>!fees.find(f=>f.studentId===st.id&&f.termId===e.termId&&(f.sessionId===e.sessionId||!f.sessionId)&&getSess(e.sessionId)?.type!=='multi'));
+      return nonMultiEnrolls.some(e=>!isEnrollBilled(e));
     }
     if(feeF==='cleared') {
       const regularFees = stFees.filter(f=>f.type!=='voucher');
@@ -1887,7 +2057,7 @@ function renderStudents(){const q=(document.getElementById('stu-search').value||
             if(to>0) return '<span class="pill pill-red" style="font-size:9px">'+(t?t.name.replace('2026 ',''):'?')+' 欠'+fmt(to)+'</span>';
             return '<span class="pill pill-green" style="font-size:9px">'+(t?t.name.replace('2026 ',''):'?')+' 結清</span>';
           }).join(' ');
-        })()}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div><div><div style="font-size:10px;color:#999">出席 / 假剩</div><div style="font-size:12px;font-weight:500">${st.attended||0} / ${(st.leaveMax||2)-(st.leaves||0)}</div></div></div><div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:flex-start">${stE.map(e=>{
+        })()}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div>${(()=>{const a=studentAttStats(st.id);return a?`<div title="${a.termName}"><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">${a.present} / ${a.leave}<span style="font-size:10px;color:${a.leave>a.leaveMax?'#A32D2D':'#999'};font-weight:400"> (可補${Math.max(0,a.leaveMax-a.leave)})</span></div></div>`:`<div><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">—</div></div>`;})()}</div><div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:flex-start">${stE.map(e=>{
         const s=getSess(e.sessionId);const t=terms.find(x=>x.id===e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;
         const termFees=fees.filter(f=>f.studentId===st.id&&f.termId===e.termId&&f.status!=='refunded');
         const termOwed=termFees.reduce((a,f)=>a+feeStatus(f).bal,0);
@@ -1991,7 +2161,7 @@ async function saveStudent(id){
   if(!d.name){alert('請輸入學生姓名');return;}
   const i=students.findIndex(s=>s.id===id);
   if(i>=0) students[i]={...students[i],...d};
-  // Update/create enrollment if session and term selected
+  let newEnroll=null;
   if(d.sessionId && d.termId){
     const existing=enrolls.findIndex(e=>e.studentId===id&&e.termId===d.termId);
     if(existing>=0){
@@ -2003,14 +2173,95 @@ async function saveStudent(id){
       const cnt=getEnrolled(d.termId,d.sessionId).length;
       const sess=getSess(d.sessionId);
       const status=sess&&cnt>=sess.capacity?'waitlist':'enrolled';
-      enrolls.push({id:'e'+Date.now(),termId:d.termId,sessionId:d.sessionId,studentId:id,status,enrollDate:today(),createdAt:today()});
+      newEnroll={id:'e'+Date.now(),termId:d.termId,sessionId:d.sessionId,studentId:id,status,enrollDate:today(),createdAt:today()};
+      enrolls.push(newEnroll);
+      await saveCol('enrolls',enrolls);
     }
-    await saveCol('enrolls',enrolls);
   }
   await saveCol('students',students);
-  closeMod();renderStudents();
+  if(newEnroll&&newEnroll.status==='enrolled') await autoCreateFeeAfterEnroll(id,d.sessionId,d.termId);
+  closeMod();renderStudents();renderFee();
 }
-async function delStu(id){if(!confirm('確認刪除此學生？'))return;students=students.filter(s=>s.id!==id);await saveCol('students',students);renderStudents();renderDash();}
+// ── 刪除學生：連同報名、帳單、收款、補課、多元券一併清除，不留孤兒資料 ──
+async function delStu(id){
+  const st=students.find(s=>s.id===id); if(!st) return;
+  const stEnrolls=enrolls.filter(e=>e.studentId===id);
+  const stFees=fees.filter(f=>f.studentId===id);
+  const feeIds=new Set(stFees.map(f=>f.id));
+  const stTxns=txns.filter(t=>feeIds.has(t.feeId)||t.studentId===id);
+  const paidSum=stTxns.filter(t=>t.type==='pay').reduce((a,t)=>a+t.amount,0);
+  const stMk=makeupRec.filter(m=>m.studentId===id);
+  const stVp=voucherPacks.filter(v=>v.studentId===id);
+  const stVb=voucherBookings.filter(b=>b.studentId===id);
+  const parts=[];
+  if(stEnrolls.length) parts.push(`報名紀錄 ${stEnrolls.length} 筆`);
+  if(stFees.length) parts.push(`帳單 ${stFees.length} 張`);
+  if(stTxns.length) parts.push(`收款／折扣／退費紀錄 ${stTxns.length} 筆`);
+  if(stMk.length) parts.push(`補課紀錄 ${stMk.length} 筆`);
+  if(stVp.length||stVb.length) parts.push(`多元券 ${stVp.length} 包、預約 ${stVb.length} 筆`);
+  let msg=`確認刪除學生「${st.name}」？`;
+  if(parts.length) msg+=`\n\n以下資料會一併刪除：\n・${parts.join('\n・')}`;
+  if(paidSum>0) msg+=`\n\n⚠ 此學生有收款 ${fmt(paidSum)}，刪除後收款統計與報表會少掉這筆金額。\n若只是不再上課，建議保留學生、移除報名即可。`;
+  msg+='\n\n刪除後無法復原。';
+  if(!confirm(msg)) return;
+  students=students.filter(s=>s.id!==id);
+  enrolls=enrolls.filter(e=>e.studentId!==id);
+  fees=fees.filter(f=>f.studentId!==id);
+  txns=txns.filter(t=>!(feeIds.has(t.feeId)||t.studentId===id));
+  makeupRec=makeupRec.filter(m=>m.studentId!==id);
+  voucherPacks=voucherPacks.filter(v=>v.studentId!==id);
+  voucherBookings=voucherBookings.filter(b=>b.studentId!==id);
+  showLoading('刪除中…');
+  await saveCol('students',students); await saveCol('enrolls',enrolls);
+  await saveCol('fees',fees); await saveCol('txns',txns); await saveCol('makeup',makeupRec);
+  await saveCol('voucherPacks',voucherPacks); await saveCol('voucherBookings',voucherBookings);
+  hideLoading();
+  renderStudents(); renderDash(); renderFee();
+  hint('學生與相關資料已刪除 ✓');
+}
+
+// ── 孤兒資料：學生已不存在，但報名／帳單等仍留著 ──
+function findOrphans(){
+  const sIds=new Set(students.map(s=>s.id));
+  const fIds=new Set(fees.map(f=>f.id));
+  const tIds=new Set(terms.map(t=>t.id));
+  return {
+    enrolls: enrolls.filter(e=>!sIds.has(e.studentId)||!tIds.has(e.termId)),
+    fees: fees.filter(f=>!sIds.has(f.studentId)),
+    txns: txns.filter(t=>!fIds.has(t.feeId)||(t.studentId&&!sIds.has(t.studentId))),
+    makeup: makeupRec.filter(m=>!sIds.has(m.studentId)),
+    vPacks: voucherPacks.filter(v=>!sIds.has(v.studentId)),
+    vBooks: voucherBookings.filter(b=>!sIds.has(b.studentId))
+  };
+}
+function updateOrphanBtn(){
+  const btn=document.getElementById('orphan-btn'); if(!btn) return;
+  const o=findOrphans();
+  const n=Object.values(o).reduce((a,arr)=>a+arr.length,0);
+  btn.style.display=n?'inline-block':'none';
+  btn.textContent='🧹 清理孤兒資料 ('+n+')';
+}
+async function cleanupOrphans(){
+  const o=findOrphans();
+  const lines=[];
+  if(o.enrolls.length) lines.push(`報名紀錄 ${o.enrolls.length} 筆（學生或期別已刪除，或只有姓名沒有學生檔案）`);
+  if(o.fees.length) lines.push(`帳單 ${o.fees.length} 張，合計 ${fmt(o.fees.reduce((a,f)=>a+f.amount,0))}`);
+  if(o.txns.length) lines.push(`收款／退費紀錄 ${o.txns.length} 筆`);
+  if(o.makeup.length) lines.push(`補課紀錄 ${o.makeup.length} 筆`);
+  if(o.vPacks.length||o.vBooks.length) lines.push(`多元券 ${o.vPacks.length} 包、預約 ${o.vBooks.length} 筆`);
+  if(!lines.length){ alert('沒有孤兒資料'); return; }
+  if(!confirm('找到以下對應不到學生（或期別）的資料：\n・'+lines.join('\n・')+'\n\n確定全部刪除？刪除後無法復原。')) return;
+  const del=k=>new Set(o[k].map(x=>x.id));
+  const dE=del('enrolls'),dF=del('fees'),dT=del('txns'),dM=del('makeup'),dP=del('vPacks'),dB=del('vBooks');
+  enrolls=enrolls.filter(x=>!dE.has(x.id)); fees=fees.filter(x=>!dF.has(x.id)); txns=txns.filter(x=>!dT.has(x.id)&&!dF.has(x.feeId));
+  makeupRec=makeupRec.filter(x=>!dM.has(x.id)); voucherPacks=voucherPacks.filter(x=>!dP.has(x.id)); voucherBookings=voucherBookings.filter(x=>!dB.has(x.id));
+  showLoading('清理中…');
+  await saveCol('enrolls',enrolls); await saveCol('fees',fees); await saveCol('txns',txns);
+  await saveCol('makeup',makeupRec); await saveCol('voucherPacks',voucherPacks); await saveCol('voucherBookings',voucherBookings);
+  hideLoading();
+  renderStudents(); renderDash(); renderFee(); renderTerms();
+  hint('孤兒資料已清理 ✓');
+}
 function openIssueFeeForStudent(stId) {
   const st = getSt(stId);
   // Get all active enrollments for this student
@@ -2396,6 +2647,7 @@ function renderTerms() {
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openIssueFeeForTerm('${t.id}')">開帳單</button>
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditTerm('${t.id}')">編輯</button>
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="cloneTerm('${t.id}')">複製下期</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:3px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openRenewTerm('${t.id}')">↪ 續報到下期</button>
         <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteTerm('${t.id}')">刪除</button>
       </div>
     </div>`;
@@ -2526,14 +2778,14 @@ function renderSignin() {
   const co       = COACHES[s.coach] || {};
   const v        = getVenue(s.venueId);
   const enrolled = getEnrolled(termId, sessId);
-  const mkStu    = makeupRec.filter(m=>m.makeupSessionId===sessId&&m.makeupDate===date&&(m.status==='scheduled'||m.status==='pending'));
+  const mkStu    = makeupRec.filter(m=>m.makeupSessionId===sessId&&m.makeupDate===date&&['scheduled','pending','done'].includes(m.status));
   const presentN = Object.values(rec).filter(x=>x==='present').length;
   const leaveN   = Object.values(rec).filter(x=>x==='leave').length;
   const isManual = document.getElementById('manual-mode')?.checked || false;
   const subName  = rec._substituteCoach || '';
 
   // QR box
-  const qrUrl = `https://haloway.app/signin?s=${sessId}&t=${termId}&d=${date}`;
+  const qrUrl = signinUrl(sessId, termId, date);
   document.getElementById('qr-area').innerHTML = `
     <div class="qr-box">
       <div style="font-size:12px;font-weight:500;margin-bottom:7px">家長 QR Code 簽到</div>
@@ -2611,6 +2863,7 @@ function renderSignin() {
   }).join('');
 
   document.getElementById('signin-body').innerHTML = statsBar + (rows || '<div class="empty">此班次尚無報名學生</div>');
+  renderSigninRequests();
 }
 
 
@@ -2618,42 +2871,9 @@ function renderSignin() {
 
 
 
-function manualCheck(stId, checked) {
-  if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
-  if (checked) {
-    signinRec[curSiKey][stId] = 'present';
-  } else {
-    // ⑦ 取消勾選改為 delete，避免寫入空字串污染簽到記錄
-    delete signinRec[curSiKey][stId];
-  }
-  _dirtySigninKeys.add(curSiKey);
-  saveSignin().catch(()=>{});
-  renderSignin();
-}
+function manualCheck(stId, checked) { setSI(curSiKey, stId, checked?'present':'', curSiTermId, curSiSessId); }
 
-async function siSetQuick(stId, status) {
-  const prev = (signinRec[curSiKey]||{})[stId] || '';
-  if (!signinRec[curSiKey]) signinRec[curSiKey] = {};
-  signinRec[curSiKey][stId] = status;
-  _dirtySigninKeys.add(curSiKey);
-  // Handle leave → create makeup record
-  const st = students.find(s=>s.id===stId);
-  if (st) {
-    if (prev==='present') st.attended = Math.max(0,(st.attended||0)-1);
-    if (prev==='leave')   st.leaves   = Math.max(0,(st.leaves||0)-1);
-    if (status==='present') st.attended = (st.attended||0)+1;
-    if (status==='leave' && prev!=='leave') {
-      st.leaves = (st.leaves||0)+1;
-      const [,date] = curSiKey.split('|');
-      // Only create makeup if not already exists
-      const exists = makeupRec.find(m=>m.studentId===stId&&m.leaveDate===date&&m.originalSessionId===curSiSessId);
-      if (!exists) await createMakeup(stId, curSiSessId, curSiTermId, date, 'manual');
-    }
-    await saveCol('students', students).catch(()=>{});
-  }
-  await saveSignin().catch(()=>{});
-  renderSignin();
-}
+async function siSetQuick(stId, status) { await setSI(curSiKey, stId, status, curSiTermId, curSiSessId); }
 
 async function saveManualSignin() {
   showLoading('儲存簽到資料…');
@@ -2685,26 +2905,14 @@ async function saveSignin() {
 
 // QR mode sign-in handler
 async function setSI(key, stId, status, termId, sessId) {
-  if (stId === '_substituteCoach') return;
-  const prev = (signinRec[key]||{})[stId] || '';
-  if (!signinRec[key]) signinRec[key] = {};
-  signinRec[key][stId] = status;
+  if (!stId || stId.startsWith('_')) return;
+  const prev=(signinRec[key]||{})[stId]||'';
+  if(!signinRec[key]) signinRec[key]={};
+  if(status) signinRec[key][stId]=status; else delete signinRec[key][stId];
   _dirtySigninKeys.add(key);
-
-  const st = students.find(s=>s.id===stId);
-  if (st) {
-    if (prev==='present') st.attended = Math.max(0,(st.attended||0)-1);
-    if (prev==='leave')   st.leaves   = Math.max(0,(st.leaves||0)-1);
-    if (status==='present') st.attended = (st.attended||0)+1;
-    if (status==='leave' && prev!=='leave') {
-      st.leaves = (st.leaves||0)+1;
-      const [,date] = key.split('|');
-      const exists = makeupRec.find(m=>m.studentId===stId&&m.leaveDate===date&&m.originalSessionId===sessId);
-      if (!exists) await createMakeup(stId, sessId, termId, date, 'qr');
-    }
-  }
+  const date=key.split('|')[1];
+  await syncMakeupOnStatusChange(stId, sessId, termId, date, prev, status||'');
   await saveSignin();
-  if (st) await saveCol('students', students).catch(()=>{});
   renderSignin(); renderDash();
 }
 
@@ -2734,19 +2942,13 @@ function simScan(termId,sessId,date) {
 
 async function confirmScan(sessId,date,termId) {
   const stId=document.getElementById('scan-stu').value;
-  const key=sessId+'|'+date;
-  if(!signinRec[key]) signinRec[key]={};
-  signinRec[key][stId]='present';
-  _dirtySigninKeys.add(key);
-  const st=students.find(s=>s.id===stId); if(st) st.attended=(st.attended||0)+1;
-  await saveSignin(); await saveCol('students',students);
+  await setSI(sessId+'|'+date, stId, 'present', termId, sessId);
   document.getElementById('mod-body').innerHTML=`<div style="text-align:center;padding:16px 0"><div style="font-size:48px">✅</div><div style="font-size:15px;font-weight:500;color:#27500A;margin-top:8px">簽到成功</div></div><button class="btn btn-outline" style="width:100%" onclick="closeMod()">關閉</button>`;
-  renderSignin(); renderDash();
 }
 
 async function createMakeup(studentId,origSessId,termId,leaveDate,source='auto') {
+  if(makeupRec.find(m=>m.studentId===studentId&&m.originalSessionId===origSessId&&m.leaveDate===leaveDate)) return;
   makeupRec.push({id:'mk'+Date.now()+Math.random().toString(36).slice(2,5),studentId,originalSessionId:origSessId,termId,leaveDate,makeupSessionId:null,makeupDate:null,status:'pending',source,createdAt:today()});
-  const st=students.find(s=>s.id===studentId); if(st) st.makeups=(st.makeups||0)+1;
   await saveCol('makeup',makeupRec);
 }
 
@@ -2931,7 +3133,7 @@ function renderPendingCard(p, t) {
         <div style="font-size:14px;font-weight:500">${p.childName} <span style="font-size:11px;color:${p.gender==='male'?'#378ADD':'#D4537E'}">${p.gender==='male'?'♂ 男生':'♀ 女生'}</span></div>
         <div style="font-size:11px;color:#999">年齡：${fmtAge(p.ageY,p.ageM)} · 身高：${p.height?p.height+'cm':'—'}</div>
         <div style="font-size:11px;color:#999">家長：${p.parentName} · ${p.phone||'—'}${p.lineId?' · LINE: '+p.lineId:''}</div>
-        <div style="font-size:11px;color:#999">送出：${p.submittedAt||'—'}</div>
+        <div style="font-size:11px;color:#999">送出：${p.submittedAt||'—'}</div>${pendingFlags(p)}
       </div>
       <span style="font-size:11px;padding:2px 8px;border-radius:8px;background:#FAEEDA;color:#412402">待審核</span>
     </div>
@@ -2956,26 +3158,41 @@ function renderPendingCard(p, t) {
 }
 
 async function approveReg(pendingId) {
-  const p = pendingSubs.find(x=>x.id===pendingId); if (!p) return;
-  const t = terms.find(x=>x.id===p.termId);
-  const sl = (p.sessionIds||[]).map(id=>getSess(id)).filter(Boolean);
-  const fullSess = sl.filter(s=>t&&getEnrolled(t.id,s.id).length>=s.capacity);
-  if (fullSess.length && !confirm(`${fullSess.map(s=>s.name).join('、')} 已滿班，確定繼續（加入候補）？`)) return;
-  const st = {id:'s'+Date.now(),name:p.childName,parent:p.parentName,phone:p.phone,lineId:p.lineId,gender:p.gender,ageY:p.ageY,ageM:p.ageM,height:p.height,period:p.autoLessons||6,attended:0,leaves:0,makeups:0,leaveMax:2,startDate:today()};
-  students.push(st);
-  if (t) {
-    // ⑤ 改為序列 await + 6碼 suffix，避免 enrolls id 碰撞
-    for (const s of sl) {
-      const cnt=getEnrolled(t.id,s.id).length;
-      const uid='e'+Date.now()+Math.random().toString(36).slice(2,8);
-      enrolls.push({id:uid,termId:p.termId,sessionId:s.id,studentId:st.id,status:cnt>=s.capacity?'waitlist':'enrolled',enrollDate:today(),createdAt:today()});
-      await new Promise(r=>setTimeout(r,2));
-    }
+  const p=pendingSubs.find(x=>x.id===pendingId); if(!p) return;
+  const t=terms.find(x=>x.id===p.termId);
+  const sl=(p.sessionIds||[]).map(id=>getSess(id)).filter(Boolean);
+  const existing=findExistingStudent(p.childName,p.phone);
+  const already=existing?sl.filter(s=>enrolls.some(e=>e.termId===p.termId&&e.sessionId===s.id&&e.studentId===existing.id)):[];
+  const toAdd=sl.filter(s=>!already.includes(s));
+  const fullSess=toAdd.filter(s=>t&&getEnrolled(t.id,s.id).length>=s.capacity);
+  const notes=[];
+  if(existing) notes.push(`「${existing.name}」是舊生，將沿用既有學生資料，不會重複建立。`);
+  if(already.length) notes.push(`已經報名：${already.map(s=>s.name).join('、')}，這些會略過。`);
+  if(fullSess.length) notes.push(`${fullSess.map(s=>s.name).join('、')} 已滿班，將列為候補。`);
+  if(notes.length&&!confirm(notes.join('\n')+'\n\n確定審核通過？')) return;
+  let st=existing;
+  if(st){
+    // 舊生：以這次填寫的最新資料更新聯絡方式與身高年齡
+    ['parentName:parent','phone:phone','lineId:lineId','gender:gender'].forEach(m=>{const [a,b]=m.split(':');if(p[a])st[b]=p[a];});
+    if(p.height) st.height=p.height;
+    if(p.ageY||p.ageM){st.ageY=p.ageY;st.ageM=p.ageM;}
+  }else{
+    st={id:'s'+Date.now(),name:p.childName,parent:p.parentName,phone:p.phone,lineId:p.lineId,gender:p.gender,ageY:p.ageY,ageM:p.ageM,height:p.height,period:p.autoLessons||6,attended:0,leaves:0,makeups:0,leaveMax:2,startDate:today()};
+    students.push(st);
   }
-  p.status = 'approved';
+  const added=[];
+  for(const s of toAdd){
+    const status=t&&getEnrolled(t.id,s.id).length>=s.capacity?'waitlist':'enrolled';
+    const e={id:'e'+Date.now()+Math.random().toString(36).slice(2,8),termId:p.termId,sessionId:s.id,studentId:st.id,status,enrollDate:today(),createdAt:today()};
+    enrolls.push(e);added.push(e);
+    await new Promise(r=>setTimeout(r,2));
+  }
+  p.status='approved'; p.studentId=st.id; p.approvedAt=new Date().toLocaleString('zh-TW',{hour12:false});
   await saveCol('students',students); await saveCol('enrolls',enrolls); await saveCol('pending',pendingSubs);
-  renderRegQR(); renderDash();
-  alert(`✓ 已新增學生「${p.childName}」！`);
+  let billed=0;
+  for(const e of added) if(e.status==='enrolled'&&await autoCreateFeeAfterEnroll(e.studentId,e.sessionId,e.termId)) billed++;
+  renderRegQR(); renderDash(); renderStudents(); renderFee(); syncRegStats();
+  hint(`✓ ${existing?'已將舊生':'已新增學生'}「${st.name}」加入 ${added.length} 門課${billed?'，帳單 '+billed+' 張已建立':''}`);
 }
 
 async function rejectReg(pendingId) {
@@ -3028,7 +3245,7 @@ function previewParentForm(termId) {
   const t = terms.find(x=>x.id===termId); if (!t) return;
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
-  document.getElementById('panel-parent-form').classList.add('active');
+  document.getElementById('panel-parent-form').classList.add('active');markNav('parent-form');
   const ts = sessions.filter(s=>t.sessions&&t.sessions.includes(s.id)).sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9));
   document.getElementById('parent-form-body').innerHTML = `
     <div class="pf-wrap">
@@ -3151,7 +3368,7 @@ function openTermAttendance(termId) {
   document.getElementById('term-att-title').textContent = t.name + ' — 點名總覽';
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
-  document.getElementById('panel-term-att').classList.add('active');
+  document.getElementById('panel-term-att').classList.add('active');markNav('term-att');
   renderTermAttendance(termId);
 }
 
@@ -3171,8 +3388,8 @@ function renderTermAttendance(termId) {
 
     const sd     = sessDates[s.id] || {};
     // Priority: session's own dates > term sessionDates > term dates
-    const startD = new Date(s.startDate || sd.start || t.startDate);
-    const endD   = new Date(s.endDate || sd.end || t.endDate);
+    const startD = new Date(sd.start || t.startDate);
+    const endD   = new Date(sd.end || t.endDate);
 
     // Generate lesson dates for this weekday
     const dayMap = {週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:0};
@@ -3381,31 +3598,14 @@ async function removeMakeupSlot(mkId, termId) {
 
 
 async function toggleAtt(sessId, date, stId, termId, origSessId) {
-  const key = sessId+'|'+date;
-  if (!signinRec[key]) signinRec[key] = {};
-  const cur = signinRec[key][stId]||'';
-  // cycle: '' → present → leave → absent → ''
-  const next = cur===''?'present':cur==='present'?'leave':cur==='leave'?'absent':'';
-  signinRec[key][stId] = next;
+  const key=sessId+'|'+date;
+  if(!signinRec[key]) signinRec[key]={};
+  const cur=signinRec[key][stId]||'';
+  const next=cur===''?'present':cur==='present'?'leave':cur==='leave'?'absent':'';
+  if(next) signinRec[key][stId]=next; else delete signinRec[key][stId];
   _dirtySigninKeys.add(key);
-  // Update student stats
-  const st = students.find(s=>s.id===stId);
-  if (st) {
-    if (cur==='present') st.attended = Math.max(0,(st.attended||0)-1);
-    if (next==='present') st.attended = (st.attended||0)+1;
-    if (cur==='leave')   st.leaves   = Math.max(0,(st.leaves||0)-1);
-    if (next==='leave') {
-      // ④ 用 exists 判斷，避免請假→出席→請假循環重複建補課
-      const mkExists = makeupRec.find(m=>m.studentId===stId&&m.leaveDate===date&&m.originalSessionId===origSessId&&m.status!=='done');
-      if (!mkExists) {
-        if((st.leaves||0)<(st.leaveMax||2)) st.leaves=(st.leaves||0)+1;
-        await createMakeup(stId, origSessId, termId, date);
-      }
-    }
-  }
+  await syncMakeupOnStatusChange(stId, sessId, termId, date, cur, next);
   await saveSignin();
-  if (st) await saveCol('students', students);
-  // re-render attendance panel
   renderTermAttendance(termId);
 }
 
@@ -3751,7 +3951,7 @@ function calcReportFee() {
     if(fFrom2&&t2&&t2.endDate<fFrom2)return;
     if(fTo2&&t2&&t2.startDate>fTo2)return;
     const key2=e.studentId+':'+e.termId+':'+e.sessionId;
-    if(!billedKeys2.has(key2)&&!noBill2.find(r=>r.key===key2)){
+    if(!isEnrollBilled(e)&&!noBill2.find(r=>r.key===key2)){
       const st2=getSt(e.studentId);const s2=getSess(e.sessionId);const pr2=s2?getSessPrice(s2.id):null;
       noBill2.push({key:key2,name:st2.name,termName:t2?t2.name:'—',sessName:s2?s2.name+' '+s2.day+' '+s2.time:'—',price:pr2,studentId:e.studentId,termId:e.termId,sessId:e.sessionId});
     }
@@ -3795,7 +3995,7 @@ function feeQuickFilter() {
     const billedStus = new Set(fees.map(f=>f.studentId+':'+f.termId+':'+(f.sessionId||'')));
     const noBillRows = [];
     enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
-      if(!billedStus.has(e.studentId+':'+e.termId+':'+e.sessionId)){
+      if(!isEnrollBilled(e)){
         const st=getSt(e.studentId); const s=getSess(e.sessionId); const t=terms.find(x=>x.id===e.termId);
         const pr=s?getSessPrice(s.id):null;
         if(!noBillRows.find(r=>r.studentId===e.studentId&&r.termId===e.termId))
@@ -3995,25 +4195,35 @@ function switchMultiTab(tab, btn) {
 function getStudentVouchers(stId) {
   return voucherPacks.filter(v => v.studentId === stId && v.status !== 'cancelled');
 }
-function getStudentRemainingVouchers(stId) {
-  const packs = getStudentVouchers(stId);
-  const used  = voucherBookings.filter(b => b.studentId===stId && b.status==='attended').length;
-  const total = packs.reduce((a,v) => a + (v.quantity||0), 0);
-  return Math.max(0, total - used);
+// 依「到期日先到先用」把每次出席分配到券包，過期券的用量不會再扣到新券
+function voucherAllocation(stId) {
+  const packs = getStudentVouchers(stId)
+    .sort((a,b)=>(a.expiryDate||'9999').localeCompare(b.expiryDate||'9999')||(a.purchaseDate||'').localeCompare(b.purchaseDate||''));
+  const used = {}; packs.forEach(p=>used[p.id]=0);
+  const att = voucherBookings.filter(b=>b.studentId===stId&&b.status==='attended')
+    .sort((a,b)=>(a.slotDate||'').localeCompare(b.slotDate||''));
+  let debt = 0;
+  att.forEach(b => {
+    const d = b.slotDate || today();
+    const free = p => used[p.id] < (p.quantity||0) && (p.expiryDate||'9999') >= d;
+    // 優先用「上課當天已購買且未過期」的券；若是先上課後補買，則用上課當天尚未過期的券
+    const p = packs.find(p => free(p) && (p.purchaseDate||'') <= d) || packs.find(free);
+    if (p) used[p.id]++; else debt++;
+  });
+  const valid = packs.filter(isVoucherValid);
+  const remaining = valid.reduce((a,p)=>a+(p.quantity||0)-used[p.id],0);
+  const expiredUnused = packs.filter(p=>!isVoucherValid(p)).reduce((a,p)=>a+(p.quantity||0)-used[p.id],0);
+  return { used, remaining, expiredUnused, debt, attended: att.length };
 }
+function getStudentRemainingVouchers(stId) { return voucherAllocation(stId).remaining; }
 function getStudentTotalVouchers(stId) {
   return getStudentVouchers(stId).reduce((a,v) => a + (v.quantity||0), 0);
 }
 function isVoucherValid(pack) {
   return pack.expiryDate >= today() && pack.status !== 'cancelled';
 }
-function getStudentValidRemaining(stId) {
-  // Only count vouchers that are still within expiry
-  const validPacks = getStudentVouchers(stId).filter(isVoucherValid);
-  const validTotal = validPacks.reduce((a,v) => a+(v.quantity||0), 0);
-  const used = voucherBookings.filter(b => b.studentId===stId && b.status==='attended').length;
-  return Math.max(0, validTotal - used);
-}
+function getStudentValidRemaining(stId) { return voucherAllocation(stId).remaining; }
+function getStudentVoucherDebt(stId) { return voucherAllocation(stId).debt; }
 
 // ── 券管理頁 ─────────────────────────────────────────────────────
 function renderVouchers() {
@@ -4046,7 +4256,8 @@ function renderVouchers() {
     const st = getSt(stId);
     const remaining = getStudentValidRemaining(stId);
     const total     = packs.reduce((a,v)=>a+(v.quantity||0),0);
-    const used      = voucherBookings.filter(b=>b.studentId===stId&&b.status==='attended').length;
+    const alloc     = voucherAllocation(stId);
+    const used      = alloc.attended;
     const nearExpiry = packs.some(v => isVoucherValid(v) && v.expiryDate <= addWeeks(today(), 4));
     return `<div class="card" style="border-left:3px solid ${remaining===0?'#ccc':nearExpiry?'var(--amber)':'var(--green)'}">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -4064,13 +4275,13 @@ function renderVouchers() {
         ${packs.sort((a,b)=>b.purchaseDate.localeCompare(a.purchaseDate)).map(v => {
           const valid = isVoucherValid(v);
           return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:0.5px solid #eee">
-            <span style="font-size:11px;flex:1">${fmtD(v.purchaseDate)} 購入 <strong>${v.quantity}張</strong></span>
+            <span style="font-size:11px;flex:1">${fmtD(v.purchaseDate)} 購入 <strong>${v.quantity}張</strong> <span style="color:#999">· 已用 ${alloc.used[v.id]||0}${!valid&&(v.quantity-(alloc.used[v.id]||0))>0?' · <span style=\'color:#A32D2D\'>過期未用 '+(v.quantity-(alloc.used[v.id]||0))+' 張</span>':''}</span></span>
             <span style="font-size:10px;color:${v.expiryDate<today()?'#A32D2D':v.expiryDate<=addWeeks(today(),4)?'#BA7517':'#999'}">到期：${fmtD(v.expiryDate)}</span>
             <span style="font-size:10px;padding:1px 6px;border-radius:5px;background:${valid?'#EAF3DE':'#f0f0f0'};color:${valid?'#27500A':'#999'}">${valid?'有效':'已過期'}</span>
           </div>`;
         }).join('')}
         <div style="display:flex;justify-content:space-between;font-size:11px;color:#666;margin-top:5px">
-          <span>共購入 ${total} 張 · 已用 ${used} 張</span>
+          <span>共購入 ${total} 張 · 已用 ${used} 張${alloc.expiredUnused>0?' · 過期未用 '+alloc.expiredUnused+' 張':''}${alloc.debt>0?' · <span style="color:#A32D2D;font-weight:500">欠券 '+alloc.debt+' 張</span>':''}</span>
           <span style="color:#27500A;font-weight:500">剩餘 ${remaining} 張</span>
         </div>
       </div>
@@ -4526,6 +4737,9 @@ function renderSlotAttBody(slotId, bookings) {
 async function setSlotAtt(slotId, bookingId, status) {
   const b = voucherBookings.find(x=>x.id===bookingId); if (!b) return;
   const prev = b.status;
+  if (status === 'attended' && prev !== 'attended' && getStudentValidRemaining(b.studentId) <= 0) {
+    if (!confirm(`${getSt(b.studentId).name} 目前沒有有效使用券。\n仍要記為出席嗎？會先記為「欠券 1 張」，之後購券時自動扣抵。`)) return;
+  }
   b.status = status;
   // Deduct voucher when marked attended (only if wasn't already attended)
   if (status === 'attended' && prev !== 'attended') {
@@ -4582,6 +4796,57 @@ async function cancelBooking(bookingId) {
 }
 
 
+// ── 一次性搬移：舊版把日期存在班次上（會被下一期沿用），改存到對應期別的「課程日期」 ──
+async function migrateSessionDates(){
+  const moved=[]; let touched=false;
+  sessions.forEach(s=>{
+    if(!('startDate' in s)&&!('endDate' in s)) return;
+    touched=true;
+    const sD=s.startDate||s.endDate;
+    if(sD){
+      const cands=terms.filter(t=>t.sessions&&t.sessions.includes(s.id)&&t.startDate);
+      const t=cands.find(t=>t.startDate<=sD&&sD<=(t.endDate||t.startDate))
+        ||[...cands].sort((a,b)=>Math.abs(new Date(a.startDate)-new Date(sD))-Math.abs(new Date(b.startDate)-new Date(sD)))[0];
+      if(t){
+        t.sessionDates=t.sessionDates||{};
+        if(!t.sessionDates[s.id]) t.sessionDates[s.id]={start:s.startDate||t.startDate,end:s.endDate||t.endDate};
+        moved.push(s.name+' '+s.day+' → '+t.name);
+      }
+    }
+    delete s.startDate; delete s.endDate;
+  });
+  if(touched){
+    await saveCol('terms',terms); await saveCol('sessions',sessions);
+    if(moved.length) console.info('[班次日期已搬到期別]',moved);
+  }
+}
+
+// ── 家長報名即時同步：家長送出後不用重新整理就會出現 ──
+let _pendingUnsub = null;
+function updatePendingBadge(){
+  const el=document.getElementById('pending-badge'); if(!el) return;
+  const n=pendingSubs.filter(p=>p.status==='pending').length;
+  el.style.display=n?'inline-block':'none'; el.textContent=n;
+}
+function startPendingListener(){
+  if (_pendingUnsub) return;
+  let first = true;
+  try {
+    _pendingUnsub = db.collection('pending').onSnapshot(snap => {
+      const before = new Set(pendingSubs.map(p=>p.id));
+      const arr = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const m = _snapOf('pending'); m.clear(); arr.forEach(x=>m.set(String(x.id), _ser(x)));
+      pendingSubs = arr;
+      const fresh = arr.filter(p=>p.status==='pending'&&!before.has(p.id));
+      updatePendingBadge();
+      syncRegStats();
+      if (!first && fresh.length) hint('🔔 新的家長報名：'+fresh.map(p=>p.childName).join('、'));
+      first = false;
+      if (document.getElementById('panel-reg-qr')?.classList.contains('active')) { try { renderRegQR(); } catch(e){} }
+    }, err => console.warn('pending listener:', err));
+  } catch(e) { console.warn(e); }
+}
+
 async function initApp() {
   showLoading('載入資料…');
   try {
@@ -4598,6 +4863,9 @@ async function initApp() {
     txns        = await fsGet('txns');
     pricing     = await fsGet('pricing');
     pendingSubs = await fsGet('pending');
+    startPendingListener();
+    startSigninRequestListener();
+    await migrateSessionDates();
     coaches     = await fsGet('coaches');
     subLog      = await fsGet('sublog');
     await loadMultiData();
@@ -4647,11 +4915,10 @@ async function initApp() {
 // ── Patch sw for new panels ──────────────────────────────────────
 function sw(tab, btn) {
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
   const panelEl = document.getElementById('panel-'+tab);
   if(!panelEl){ console.error('sw: panel not found: panel-'+tab); return; }
   panelEl.classList.add('active');
-  if(btn) btn.classList.add('active');
+  markNav(tab);
   try {
     ({
       dash:renderDash, venues:renderVenues, sessions:renderSessions, terms:renderTerms,
@@ -5032,6 +5299,8 @@ async function initParentRegPage(termId) {
     content.innerHTML = '<div style="text-align:center;padding:30px;color:#A32D2D">資料載入失敗，請重新掃描 QR Code</div>';
     return;
   }
+  // 各班待審件數（用來判斷填單上限）；讀不到時只以正取人數判斷
+  try { (await fsGet('regStats')).forEach(r => regStatsAll[r.id] = r); } catch(e) {}
 
   if (termId) {
     renderParentRegForm(termId);
@@ -5064,6 +5333,13 @@ function renderParentRegForm(termId) {
     .sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9));
 
   const sessDates = t.sessionDates || {};
+
+  // 報名期間檢查
+  const _td = today(), _openFrom = t.preRegStartDate || t.enrollStartDate || '';
+  const _closedCard = (icon, title, msg) => `<div style="background:#fff;border-radius:14px;padding:30px 18px;margin-top:12px;text-align:center"><div style="font-size:46px">${icon}</div><div style="font-size:17px;font-weight:600;margin:10px 0 6px">${t.name}</div><div style="font-size:14px;font-weight:500;color:#A32D2D;margin-bottom:6px">${title}</div><div style="font-size:13px;color:#666;line-height:1.7">${msg}</div></div>`;
+  if (t.enrollEndDate && _td > t.enrollEndDate) { content.innerHTML = _closedCard('⏰','報名已截止',`本期報名已於 ${fmtD(t.enrollEndDate)} 截止，<br>如需報名請直接與我們聯繫。`); return; }
+  if (_openFrom && _td < _openFrom) { content.innerHTML = _closedCard('🗓','尚未開放報名',`本期將於 ${fmtD(_openFrom)} 開放報名，<br>敬請期待！`); return; }
+  const _pendCounts = (regStatsAll[termId] && regStatsAll[termId].counts) || {};
 
   content.innerHTML = `
     <!-- Term header -->
@@ -5147,7 +5423,11 @@ function renderParentRegForm(termId) {
       ${termSessions.map(s => {
         const v = getVenue(s.venueId);
         const cnt = enrolls.filter(e=>e.termId===termId&&e.sessionId===s.id&&e.status==='enrolled').length;
-        const isFull = cnt >= s.capacity;
+        const formLimit = s.formLimit || s.capacity;
+        const taken = cnt + (_pendCounts[s.id] || 0);
+        const isCapFull = cnt >= s.capacity;
+        const isFull = isCapFull || taken >= formLimit;
+        const freeSlots = Math.max(0, Math.min(formLimit - taken, s.capacity - cnt));
         const pr = pricing.find(p=>p.sessId===s.id);
         const sd = sessDates[s.id] || {};
         return `<label style="display:flex;align-items:flex-start;gap:12px;padding:12px;border:1px solid ${isFull?'#f0f0f0':'#e0e0e0'};border-radius:10px;margin-bottom:8px;cursor:${isFull?'not-allowed':'pointer'};background:${isFull?'#fafafa':'#fff'}">
@@ -5158,7 +5438,7 @@ function renderParentRegForm(termId) {
             <div style="font-size:12px;color:#666;margin-top:2px">${s.day} ${s.time} · ${s.coach} 教練${v?' · '+v.name:''}</div>
             ${sd.start?`<div style="font-size:11px;color:#378ADD;margin-top:2px">📅 ${fmtD(sd.start)} — ${fmtD(sd.end)}</div>`:''}
             <div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap">
-              <span style="font-size:10px;padding:2px 7px;border-radius:6px;background:${isFull?'#FCEBEB':'#EAF3DE'};color:${isFull?'#501313':'#27500A'}">${isFull?'已滿班':cnt+'/'+s.capacity+' 人'}</span>
+              <span style="font-size:10px;padding:2px 7px;border-radius:6px;background:${isFull?'#FCEBEB':'#EAF3DE'};color:${isFull?'#501313':'#27500A'}">${isFull?(isCapFull?'已滿班':'名額暫滿，待審核後通知'):'剩 '+freeSlots+' 名額'}</span>
               <span style="font-size:11px;color:#666">${s.periodLessons} 堂/期</span>
               ${pr?`<span style="font-size:11px;font-weight:500;color:#27500A;padding:2px 7px;border-radius:6px;background:#EAF3DE;border:0.5px solid #C0DD97">NT$${pr.price.toLocaleString()}</span>`:''}
             </div>
@@ -5236,12 +5516,23 @@ async function submitParentReg(termId) {
     submittedAt: new Date().toLocaleString('zh-TW',{hour12:false})
   };
 
+  // 同一支手機重複送出提醒
+  const _dupKey = 'holiway_reg_' + termId + '_' + childName.replace(/\s+/g,'');
+  try { if (localStorage.getItem(_dupKey) && !confirm(`「${childName}」本期已經送出過報名，確定要再送一次嗎？\n（如要修改課程，請直接與我們聯繫）`)) return; } catch(e) {}
+
   // Disable button to prevent double-submit
   const btn = document.querySelector('#parent-reg-content button[onclick]');
   if (btn) { btn.disabled=true; btn.textContent='送出中...'; }
 
   try {
     await db.collection('pending').doc(sub.id).set(sub);
+    try { localStorage.setItem(_dupKey, sub.id); } catch(e) {}
+    // 更新各班待審件數，讓下一位家長看到正確名額（管理端也會定期校正）
+    try {
+      const inc = firebase.firestore.FieldValue.increment(1);
+      const counts = {}; sessionIds.forEach(sid => counts[sid] = inc);
+      await db.collection('regStats').doc(termId).set({ counts }, { merge: true });
+    } catch(e) {}
     // Show success - keep parent-reg-page visible, never show login
     document.getElementById('parent-reg-page').style.display = 'block';
     document.getElementById('login-screen').style.display    = 'none';
@@ -5537,8 +5828,8 @@ function showSessAttInModal(sessId, termId) {
   const holidays  = t ? (t.holidays||[]).map(h=>h.date) : [];
   const sessDates = t ? (t.sessionDates||{}) : {};
   const sd     = sessDates[sessId] || {};
-  const startD = new Date(s.startDate || sd.start||(t?t.startDate:''));
-  const endD   = new Date(s.endDate || sd.end||(t?t.endDate:''));
+  const startD = new Date(sd.start||(t?t.startDate:''));
+  const endD   = new Date(sd.end||(t?t.endDate:''));
 
   // Generate lesson dates
   const dayMap = {週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:0};
@@ -5621,6 +5912,455 @@ function showSessAttInModal(sessId, termId) {
     </div>`;
 }
 
+// ══════════════════════════════════════════════════════
+// ⑥ 自動開帳：所有報名途徑一致，逐門課判斷是否已開帳
+// ══════════════════════════════════════════════════════
+function feeCoversSession(f, sessId){
+  return f.sessionId===sessId || (Array.isArray(f.courses)&&f.courses.some(c=>c.sessId===sessId));
+}
+
+function isLegacyUnlinkedFee(f){ return !f.sessionId && !(Array.isArray(f.courses)&&f.courses.length) && f.type!=='voucher'; }
+
+// 這筆報名是否已開帳（舊版沒有標示課程的帳單，視為已開帳，避免重複收費）
+function isEnrollBilled(e){
+  return fees.some(f=>f.studentId===e.studentId&&f.termId===e.termId&&(feeCoversSession(f,e.sessionId)||isLegacyUnlinkedFee(f)));
+}
+
+// ══════════════════════════════════════════════════════
+// ⑧⑨ 簽到與補課同步；出席/請假次數改由簽到紀錄即時計算
+// ══════════════════════════════════════════════════════
+// 依期別與班次排出實際上課日期（與點名總覽相同規則：跳過休課日、湊滿堂數）
+function getLessonDates(t, s){
+  if(!t||!s) return [];
+  const holidays=(t.holidays||[]).map(h=>h.date);
+  const sd=(t.sessionDates||{})[s.id]||{};
+  const startD=new Date(sd.start||t.startDate), endD=new Date(sd.end||t.endDate);
+  if(isNaN(startD)||isNaN(endD)) return [];
+  const dayMap={週一:1,週二:2,週三:3,週四:4,週五:5,週六:6,週日:0};
+  const target=dayMap[s.day]; const dates=[];
+  const cur=new Date(startD); const maxEnd=new Date(endD);
+  maxEnd.setDate(maxEnd.getDate()+Math.max(holidays.length,4)*7+14);
+  while(cur<=maxEnd&&dates.length<(s.periodLessons||0)){
+    if(cur.getDay()===target){const ds=cur.toISOString().slice(0,10);if(!holidays.includes(ds))dates.push(ds);}
+    cur.setDate(cur.getDate()+1);
+  }
+  return dates;
+}
+
+// 學生在某期某班的出缺勤統計
+function enrollAttStats(stId, t, s){
+  const dates=getLessonDates(t,s); const r={present:0,leave:0,absent:0,lessons:dates.length};
+  dates.forEach(d=>{const v=(signinRec[s.id+'|'+d]||{})[stId];if(v==='present')r.present++;else if(v==='leave')r.leave++;else if(v==='absent')r.absent++;});
+  return r;
+}
+
+// 學生卡片用：目前這一期（進行中優先，否則最近一期）的出缺勤合計
+function studentAttStats(stId){
+  const st=students.find(s=>s.id===stId)||{};
+  const myE=enrolls.filter(e=>e.studentId===stId&&e.status==='enrolled'&&getSess(e.sessionId)?.type!=='multi');
+  const myTerms=[...new Set(myE.map(e=>e.termId))].map(id=>terms.find(t=>t.id===id)).filter(Boolean);
+  if(!myTerms.length) return null;
+  const t=myTerms.find(t=>termStatus(t).key==='active')||[...myTerms].sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||''))[0];
+  const r={termName:t.name,present:0,leave:0,absent:0,lessons:0,leaveMax:0};
+  myE.filter(e=>e.termId===t.id).forEach(e=>{const x=enrollAttStats(stId,t,getSess(e.sessionId));r.present+=x.present;r.leave+=x.leave;r.absent+=x.absent;r.lessons+=x.lessons;r.leaveMax+=(st.leaveMax||2);});
+  return r;
+}
+
+const SI_LABEL={present:'出席',leave:'請假',absent:'缺席','':'未記錄'};
+
+// 簽到狀態改變時，同步補課紀錄：
+// ・補課學生在補課班出席 → 補課自動完成；取消出席 → 回到已排課
+// ・請假 → 自動建立待安排補課（超過可請假次數會先確認）
+// ・原本請假改成其他狀態 → 移除當初建立的補課（已排好日期的會先確認）
+async function syncMakeupOnStatusChange(stId, sessId, termId, date, prev, next){
+  if(prev===next) return false;
+  let changed=false;
+  const mkHere=makeupRec.filter(m=>m.studentId===stId&&m.makeupSessionId===sessId&&m.makeupDate===date);
+  mkHere.forEach(m=>{
+    if(next==='present'&&m.status!=='done'){m.status='done';changed=true;}
+    else if(next!=='present'&&m.status==='done'){m.status='scheduled';changed=true;}
+  });
+  if(!mkHere.length){
+    if(next==='leave'){
+      const exists=makeupRec.find(m=>m.studentId===stId&&m.originalSessionId===sessId&&m.leaveDate===date);
+      if(!exists){
+        let create=true;
+        const t=terms.find(x=>x.id===termId), s=getSess(sessId), st=students.find(x=>x.id===stId);
+        if(t&&s){
+          const used=enrollAttStats(stId,t,s).leave; // 已包含本次請假
+          const max=(st&&st.leaveMax)||2;
+          if(used>max) create=confirm(`${st?st.name:''} 本期這門課已請假 ${used} 次，超過可補課次數（${max} 次）。\n仍要建立補課嗎？選「取消」只記錄請假、不安排補課。`);
+        }
+        if(create){
+          makeupRec.push({id:'mk'+Date.now()+Math.random().toString(36).slice(2,5),studentId:stId,originalSessionId:sessId,termId,leaveDate:date,makeupSessionId:null,makeupDate:null,status:'pending',source:'auto',createdAt:today()});
+          changed=true;
+        }
+      }
+    }
+    if(prev==='leave'){
+      const mk=makeupRec.find(m=>m.studentId===stId&&m.originalSessionId===sessId&&m.leaveDate===date&&m.status!=='done');
+      if(mk){
+        const ok=mk.status==='pending'||confirm(`${getSt(stId).name} 這次請假已安排補課（${mk.makeupDate||'日期未定'}），改為「${SI_LABEL[next]||next}」後，要一併取消這次補課嗎？`);
+        if(ok){makeupRec=makeupRec.filter(x=>x!==mk);changed=true;}
+      }
+    }
+  }
+  if(changed) await saveCol('makeup',makeupRec);
+  return changed;
+}
+
+// ══════════════════════════════════════════════════════
+// ⑩ 家長 QR 掃碼簽到（免登入）
+// 家長填孩子姓名＋手機 → 寫入 signinRequests → 系統比對學生後自動記出席
+// 家長頁不讀取學生名單，避免個資外流
+// ══════════════════════════════════════════════════════
+let signinReqs=[];
+
+let _sreqUnsub=null;
+
+const _normName=s=>(s||'').replace(/\s+/g,'').toLowerCase();
+
+const _digits=s=>(s||'').replace(/\D/g,'');
+
+function phoneMatch(a,b){const x=_digits(a),y=_digits(b);if(!x||!y)return false;return x.slice(-9)===y.slice(-9);}
+
+// 依姓名＋電話找既有學生：電話相符優先；學生沒留電話時，姓名唯一才算
+function findExistingStudent(name, phone, pool){
+  const list=(pool||students).filter(s=>_normName(s.name)===_normName(name));
+  if(!list.length) return null;
+  if(_digits(phone)){
+    const byPhone=list.find(s=>phoneMatch(s.phone,phone));
+    if(byPhone) return byPhone;
+    // 電話對不到：只有在「同名只有一位、且這位沒留電話」時才視為同一人
+    return (list.length===1&&!_digits(list[0].phone))?list[0]:null;
+  }
+  return list.length===1?list[0]:null;
+}
+
+function signinUrl(sessId,termId,date){
+  return location.origin+location.pathname+'?mode=signin&s='+encodeURIComponent(sessId)+'&t='+encodeURIComponent(termId)+'&d='+date;
+}
+
+function startSigninRequestListener(){
+  if(_sreqUnsub) return;
+  try{
+    _sreqUnsub=db.collection('signinRequests').where('status','in',['new','unmatched']).onSnapshot(snap=>{
+      signinReqs=snap.docs.map(d=>({id:d.id,...d.data()}));
+      processSigninRequests();
+      if(document.getElementById('panel-signin')?.classList.contains('active')) renderSigninRequests();
+    },err=>console.warn('signinRequests listener:',err));
+  }catch(e){console.warn(e);}
+}
+
+let _sreqBusy=false;
+
+async function processSigninRequests(){
+  if(_sreqBusy) return; _sreqBusy=true;
+  try{
+    for(const r of signinReqs.filter(x=>x.status==='new')){
+      const enrolledIds=getEnrolled(r.termId,r.sessId).map(e=>e.studentId);
+      const mkIds=makeupRec.filter(m=>m.makeupSessionId===r.sessId&&m.makeupDate===r.date).map(m=>m.studentId);
+      const pool=students.filter(s=>enrolledIds.includes(s.id)||mkIds.includes(s.id));
+      const st=findExistingStudent(r.childName,r.phone,pool);
+      if(st){
+        await applyRequestSignin(r,st.id,'auto');
+      }else{
+        r.status='unmatched';
+        await db.collection('signinRequests').doc(r.id).set({...r,status:'unmatched'});
+      }
+    }
+  }catch(e){console.warn('processSigninRequests',e);}
+  finally{_sreqBusy=false;}
+}
+
+async function applyRequestSignin(r, stId, how){
+  const key=r.sessId+'|'+r.date;
+  const prev=(signinRec[key]||{})[stId]||'';
+  if(prev!=='present'){
+    if(!signinRec[key]) signinRec[key]={};
+    signinRec[key][stId]='present';
+    _dirtySigninKeys.add(key);
+    await syncMakeupOnStatusChange(stId,r.sessId,r.termId,r.date,prev,'present');
+    await saveSignin();
+  }
+  await db.collection('signinRequests').doc(r.id).set({...r,status:'applied',studentId:stId,matchedBy:how,processedAt:new Date().toISOString()});
+  signinReqs=signinReqs.filter(x=>x.id!==r.id);
+  if(how==='auto') hint('📲 '+getSt(stId).name+' 已掃碼簽到');
+  if(document.getElementById('panel-signin')?.classList.contains('active')){renderSignin();}
+  renderDash();
+}
+
+// 簽到頁上方：系統對不到學生的掃碼簽到，由教練指定或忽略
+function renderSigninRequests(){
+  const box=document.getElementById('si-req-area'); if(!box) return;
+  const list=signinReqs.filter(r=>r.status==='unmatched');
+  if(!list.length){box.innerHTML='';return;}
+  box.innerHTML=`<div style="background:#FFF8E6;border:0.5px solid #FAC775;border-radius:10px;padding:10px 12px;margin-bottom:8px">
+    <div style="font-size:12px;font-weight:500;color:#412402;margin-bottom:6px">📲 家長已掃碼，但系統對不到學生（${list.length} 筆）— 請指定是哪位學生</div>
+    ${list.map(r=>{
+      const s=getSess(r.sessId);
+      const cands=getEnrolled(r.termId,r.sessId).map(e=>getSt(e.studentId)).filter(x=>x.id);
+      return `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 0;border-top:0.5px solid #F3DDB0">
+        <span style="font-size:12px;font-weight:500">${r.childName||'?'}</span>
+        <span style="font-size:11px;color:#999">${r.phone||''} · ${s?s.name+' '+s.day+' '+s.time:''} · ${fmtD(r.date)}</span>
+        <span style="flex:1"></span>
+        <select id="sreq-${r.id}" style="width:auto;font-size:11px"><option value="">— 指定學生 —</option>${cands.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select>
+        <button class="btn btn-green" style="font-size:11px;padding:2px 9px" onclick="assignSigninRequest('${r.id}')">記出席</button>
+        <button class="btn btn-outline" style="font-size:11px;padding:2px 9px" onclick="dismissSigninRequest('${r.id}')">忽略</button>
+      </div>`;}).join('')}
+  </div>`;
+}
+
+async function assignSigninRequest(reqId){
+  const r=signinReqs.find(x=>x.id===reqId); if(!r) return;
+  const stId=document.getElementById('sreq-'+reqId)?.value;
+  if(!stId){alert('請先選擇學生');return;}
+  const st=students.find(s=>s.id===stId);
+  // 順便把家長填的電話補進學生資料，下次就能自動比對
+  if(st&&r.phone&&!_digits(st.phone)){st.phone=r.phone;await saveCol('students',students);}
+  await applyRequestSignin(r,stId,'manual');
+  renderSigninRequests(); hint('已記出席 ✓');
+}
+
+async function dismissSigninRequest(reqId){
+  const r=signinReqs.find(x=>x.id===reqId); if(!r) return;
+  await db.collection('signinRequests').doc(r.id).set({...r,status:'dismissed',processedAt:new Date().toISOString()});
+  signinReqs=signinReqs.filter(x=>x.id!==reqId);
+  renderSigninRequests();
+}
+
+// 家長掃碼後看到的簽到頁
+async function initParentSigninPage(params){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('parent-reg-page').style.display='block';
+  const sub=document.querySelector('#parent-reg-page > div > div:nth-child(2)'); if(sub) sub.textContent='課堂簽到';
+  const box=document.getElementById('parent-reg-content');
+  const sessId=params.get('s'), termId=params.get('t'), date=params.get('d');
+  const card=html=>`<div style="background:#fff;border-radius:14px;padding:22px 18px;margin-top:12px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.05)">${html}</div>`;
+  if(!sessId||!date){box.innerHTML=card('<div style="color:#A32D2D">QR Code 內容不完整，請向教練索取今天的簽到 QR Code</div>');return;}
+  if(date!==today()){box.innerHTML=card(`<div style="font-size:40px">📅</div><div style="font-size:15px;font-weight:500;margin:8px 0">這是 ${fmtD(date)} 的簽到碼</div><div style="font-size:13px;color:#666">今天是 ${fmtD(today())}，請掃描今天的簽到 QR Code</div>`);return;}
+  let s=null;
+  try{const d=await db.collection('sessions').doc(sessId).get();s=d.exists?d.data():null;}catch(e){}
+  let saved={};try{saved=JSON.parse(localStorage.getItem('holiway_signin')||'{}');}catch(e){}
+  box.innerHTML=card(`
+    <div style="font-size:13px;color:#999">${fmtD(date)}</div>
+    <div style="font-size:18px;font-weight:600;color:var(--pink);margin:4px 0">${s?s.name:'課堂簽到'}</div>
+    ${s?`<div style="font-size:12px;color:#666;margin-bottom:14px">${s.day} ${s.time} · ${s.coach||''} 教練</div>`:'<div style="margin-bottom:14px"></div>'}
+    <div style="text-align:left">
+      <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">孩子姓名 *</label>
+      <input type="text" id="psi-name" value="${saved.name||''}" placeholder="請輸入孩子姓名" style="width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:10px">
+      <label style="font-size:12px;color:#666;margin-bottom:4px;display:block">家長手機 *</label>
+      <input type="tel" id="psi-phone" value="${saved.phone||''}" placeholder="報名時留的手機號碼" style="width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:10px;font-size:15px;margin-bottom:14px">
+    </div>
+    <button id="psi-btn" onclick="submitParentSignin('${sessId}','${termId||''}','${date}')" style="width:100%;padding:14px;background:var(--pink);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer">確認簽到</button>
+    <div style="font-size:11px;color:#aaa;margin-top:10px">同一台手機下次會自動帶入資料</div>`);
+}
+
+async function submitParentSignin(sessId,termId,date){
+  const name=document.getElementById('psi-name').value.trim();
+  const phone=document.getElementById('psi-phone').value.trim();
+  if(!name){alert('請填寫孩子姓名');return;}
+  if(_digits(phone).length<8){alert('請填寫家長手機');return;}
+  const btn=document.getElementById('psi-btn'); if(btn){btn.disabled=true;btn.textContent='送出中…';}
+  const req={id:'sr'+Date.now()+Math.random().toString(36).slice(2,6),sessId,termId,date,childName:name,phone,status:'new',createdAt:new Date().toISOString()};
+  try{
+    await db.collection('signinRequests').doc(req.id).set(req);
+    try{localStorage.setItem('holiway_signin',JSON.stringify({name,phone}));}catch(e){}
+    const box=document.getElementById('parent-reg-content');
+    const show=(icon,title,msg)=>{box.innerHTML=`<div style="background:#fff;border-radius:14px;padding:30px 18px;margin-top:12px;text-align:center"><div style="font-size:52px">${icon}</div><div style="font-size:17px;font-weight:600;margin:10px 0 6px;color:#27500A">${title}</div><div style="font-size:13px;color:#666;line-height:1.7">${msg}</div></div>`;};
+    show('⏳','已送出簽到',`${name}，系統確認中…`);
+    // 等待系統比對結果（教練端開著系統時，幾秒內就會更新）
+    try{
+      db.collection('signinRequests').doc(req.id).onSnapshot(d=>{
+        const x=d.data&&d.data(); if(!x) return;
+        if(x.status==='applied') show('✅','簽到完成',`${name}，今天的課程已簽到<br>祝上課愉快！`);
+        else if(x.status==='unmatched') show('📝','已送出簽到','系統暫時對不到報名資料，<br>教練會協助確認，不需要重新送出。');
+      });
+    }catch(e){}
+  }catch(e){
+    alert('送出失敗，請檢查網路後再試一次');
+    if(btn){btn.disabled=false;btn.textContent='確認簽到';}
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// ⑫ 家長報名：報名期間、填單上限、重複送出、舊生沿用
+// ══════════════════════════════════════════════════════
+let regStatsAll={};
+
+// termId -> {counts:{sessId: 待審件數}}
+// 管理端依待審資料重新計算各班待審人數，供家長報名頁判斷填單上限
+let _regStatsCache={};
+
+async function syncRegStats(){
+  const byTerm={};
+  pendingSubs.filter(p=>p.status==='pending').forEach(p=>{
+    byTerm[p.termId]=byTerm[p.termId]||{};
+    (p.sessionIds||[]).forEach(sid=>byTerm[p.termId][sid]=(byTerm[p.termId][sid]||0)+1);
+  });
+  const ids=new Set([...Object.keys(byTerm),...Object.keys(_regStatsCache)]);
+  for(const tid of ids){
+    const counts=byTerm[tid]||{};
+    const ser=JSON.stringify(counts);
+    if(_regStatsCache[tid]===ser) continue;
+    try{await db.collection('regStats').doc(tid).set({counts});_regStatsCache[tid]=ser;}catch(e){console.warn('regStats',e);break;}
+  }
+}
+
+function pendingFlags(p){
+  const out=[];
+  const ex=findExistingStudent(p.childName,p.phone);
+  if(ex) out.push(`<span style="font-size:10px;padding:1px 7px;border-radius:6px;background:#E6F1FB;color:#0C447C">舊生：將沿用「${ex.name}」的學生資料</span>`);
+  const dup=pendingSubs.filter(x=>x.id!==p.id&&x.termId===p.termId&&(x.status==='pending'||x.status==='approved')&&_normName(x.childName)===_normName(p.childName)&&phoneMatch(x.phone,p.phone));
+  if(dup.length) out.push(`<span style="font-size:10px;padding:1px 7px;border-radius:6px;background:#FCEBEB;color:#501313">⚠ 可能重複送出（同名同電話另有 ${dup.length} 筆${dup.some(x=>x.status==='approved')?'，其中已有審核通過':''}）</span>`);
+  return out.length?`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">${out.join('')}</div>`:'';
+}
+
+// ══════════════════════════════════════════════════════
+// ⑬⑭ 班次「目前期別」判斷、停用功能
+// ══════════════════════════════════════════════════════
+let dashShowAll = false;
+
+// 總覽課表：是否顯示全部班次
+let sessShowInactive = false;
+
+// 課程頁：是否顯示已停用班次
+// 班次所屬、尚未結束的期別（進行中優先，其次最早開課）
+function currentTermsOf(s){ return terms.filter(t=>termStatus(t).key!=='ended'&&(t.sessions||[]).includes(s.id)); }
+
+function currentTermFor(s){
+  const ts=currentTermsOf(s);
+  return ts.find(t=>termStatus(t).key==='active')||[...ts].sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''))[0]||null;
+}
+
+async function toggleSessionStatus(id){
+  const s=getSess(id); if(!s) return;
+  if(s.status!=='inactive'){
+    const ts=currentTermsOf(s);
+    if(ts.length&&!confirm(`「${s.name} ${s.day} ${s.time}」還排在 ${ts.map(t=>t.name).join('、')}。\n停用後不會從這些期別移除，只是不再出現在課程列表與新期別的選單中。\n確定停用？`)) return;
+    s.status='inactive';
+  } else s.status='active';
+  await saveCol('sessions',sessions);
+  renderSessions(); renderDash();
+  hint(s.status==='inactive'?'班次已停用，歷史資料都保留 ✓':'班次已重新啟用 ✓');
+}
+
+async function tidyIdleSessions(){
+  const idle=sessions.filter(s=>s.status!=='inactive'&&!currentTermsOf(s).length);
+  if(!idle.length){alert('沒有閒置的班次');return;}
+  const preview=idle.slice(0,15).map(s=>`・${s.name} ${s.day} ${s.time}`).join('\n')+(idle.length>15?`\n…等共 ${idle.length} 個`:'');
+  if(!confirm(`以下 ${idle.length} 個班次沒有排入任何進行中或未來的期別：\n\n${preview}\n\n要全部停用嗎？\n停用只是收起來，報名、簽到、帳單等歷史資料都會保留，隨時可以重新啟用。`)) return;
+  idle.forEach(s=>s.status='inactive');
+  await saveCol('sessions',sessions);
+  renderSessions(); renderDash();
+  hint(`已停用 ${idle.length} 個閒置班次 ✓`);
+}
+
+// ══════════════════════════════════════════════════════
+// ⑮ 一鍵續報：本期學生帶入下一期
+// ══════════════════════════════════════════════════════
+function sessLabelShort(s){return s?`${s.name} · ${s.day} ${s.time}`:'—';}
+
+function guessRenewSession(s, target){
+  const ts=sessions.filter(x=>(target.sessions||[]).includes(x.id));
+  return ts.find(x=>x.id===s.id)
+    ||ts.find(x=>x.name===s.name&&x.day===s.day&&x.time===s.time)
+    ||ts.find(x=>x.name===s.name&&x.day===s.day)
+    ||null;
+}
+
+function openRenewTerm(fromId, targetId){
+  const from=terms.find(t=>t.id===fromId); if(!from) return;
+  const targets=terms.filter(t=>t.id!==fromId&&termStatus(t).key!=='ended'&&(t.startDate||'')>(from.startDate||''))
+    .sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''));
+  if(!targets.length){
+    if(confirm('還沒有下一期可以續報。\n要先用「複製下期」建立下一期嗎？')) cloneTerm(fromId);
+    return;
+  }
+  const target=targets.find(t=>t.id===targetId)||targets[0];
+  const tSess=sessions.filter(x=>(target.sessions||[]).includes(x.id)).sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)||(a.time||'').localeCompare(b.time||''));
+  const src=enrolls.filter(e=>e.termId===fromId&&e.status==='enrolled'&&students.some(s=>s.id===e.studentId))
+    .sort((a,b)=>getSt(a.studentId).name.localeCompare(getSt(b.studentId).name,'zh-Hant'));
+  window._renew={fromId,targetId:target.id,rows:src.map((e,i)=>{
+    const s=getSess(e.sessionId); const g=s?guessRenewSession(s,target):null;
+    const done=g&&enrolls.some(x=>x.termId===target.id&&x.studentId===e.studentId&&x.sessionId===g.id);
+    return {i,studentId:e.studentId,fromSessId:e.sessionId,toSessId:g?g.id:'',already:!!done};
+  })};
+  const rows=window._renew.rows;
+  const opts=cur=>`<option value="">— 不續報 —</option>`+tSess.map(x=>`<option value="${x.id}" ${x.id===cur?'selected':''}>${sessLabelShort(x)}</option>`).join('');
+  document.getElementById('mod-title').textContent='一鍵續報';
+  document.getElementById('mod-body').innerHTML=`
+    <div class="fg" style="margin-bottom:6px">
+      <div class="fr"><label>從</label><div style="font-size:13px;font-weight:500;padding:5px 0">${from.name}</div></div>
+      <div class="fr"><label>續報到</label><select id="rn-target" onchange="openRenewTerm('${fromId}',this.value)">${targets.map(t=>`<option value="${t.id}" ${t.id===target.id?'selected':''}>${t.name}（${termStatus(t).label}）</option>`).join('')}</select></div>
+    </div>
+    ${!tSess.length?`<div class="info-box" style="background:#FCEBEB;color:#501313">「${target.name}」還沒有加入任何班次，請先到期別「編輯」加入班次。</div>`:''}
+    <div class="info-box">系統已依「同一個班次」或「同名稱、同時段」自動對應下期班次，可逐一調整；不想續報的學生取消勾選即可。</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:5px;margin:0;cursor:pointer"><input type="checkbox" id="rn-all" checked onchange="document.querySelectorAll('.rn-chk:not(:disabled)').forEach(c=>c.checked=this.checked);renewCount()" style="width:auto"><span style="font-size:12px">全選</span></label>
+      <label style="display:flex;align-items:center;gap:5px;margin:0;cursor:pointer"><input type="checkbox" id="rn-bill" checked style="width:auto"><span style="font-size:12px">同時開立帳單</span></label>
+      <span id="rn-count" style="font-size:12px;color:#27500A;margin-left:auto"></span>
+    </div>
+    <div style="max-height:46vh;overflow-y:auto;border:0.5px solid #e0e0e0;border-radius:8px;padding:2px 8px">
+      ${rows.length?rows.map(r=>{const st=getSt(r.studentId);return`<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:0.5px solid #eee;flex-wrap:wrap;${r.already?'opacity:.55':''}">
+        <input type="checkbox" class="rn-chk" data-i="${r.i}" ${r.already?'disabled':(r.toSessId?'checked':'')} onchange="renewCount()" style="width:auto">
+        <div style="flex:1;min-width:120px"><div style="font-size:12px;font-weight:500">${st.name}${r.already?' <span style="font-size:10px;color:#27500A">已在下期</span>':''}</div><div style="font-size:10px;color:#999">本期：${sessLabelShort(getSess(r.fromSessId))}</div></div>
+        <select class="rn-sel" data-i="${r.i}" ${r.already?'disabled':''} onchange="window._renew.rows[${r.i}].toSessId=this.value;const c=document.querySelector('.rn-chk[data-i=&quot;${r.i}&quot;]');if(c)c.checked=!!this.value;renewCount()" style="width:auto;max-width:200px;font-size:11px">${opts(r.toSessId)}</select>
+      </div>`;}).join(''):'<div class="empty">本期沒有正取學生</div>'}
+    </div>
+    <div id="rn-cap" style="font-size:11px;margin-top:6px"></div>
+    <button class="btn btn-pink" style="width:100%;margin-top:8px" onclick="submitRenew()" ${!tSess.length||!rows.length?'disabled':''}>確認續報</button>`;
+  document.getElementById('overlay').style.display='flex';
+  renewCount();
+}
+
+function renewCount(){
+  const R=window._renew; if(!R) return;
+  const picked=R.rows.filter(r=>!r.already&&r.toSessId&&document.querySelector(`.rn-chk[data-i="${r.i}"]`)?.checked);
+  const el=document.getElementById('rn-count'); if(el) el.textContent=`將續報 ${picked.length} 人`;
+  // 依下期班次統計，提醒會超過滿班的班次
+  const by={}; picked.forEach(r=>by[r.toSessId]=(by[r.toSessId]||0)+1);
+  const warn=Object.entries(by).map(([sid,n])=>{const s=getSess(sid);const cur=getEnrolled(R.targetId,sid).length;return s&&cur+n>s.capacity?`${s.name} ${s.day} ${s.time}：${cur}+${n} 人，超過滿班 ${s.capacity}，多出的會列為候補`:null;}).filter(Boolean);
+  const cap=document.getElementById('rn-cap');
+  if(cap) cap.innerHTML=warn.length?`<div style="background:#FAEEDA;color:#412402;border-radius:8px;padding:6px 9px">⚠ ${warn.join('<br>⚠ ')}</div>`:'';
+}
+
+async function submitRenew(){
+  const R=window._renew; if(!R) return;
+  const target=terms.find(t=>t.id===R.targetId);
+  const bill=document.getElementById('rn-bill')?.checked;
+  const picked=R.rows.filter(r=>!r.already&&r.toSessId&&document.querySelector(`.rn-chk[data-i="${r.i}"]`)?.checked);
+  if(!picked.length){alert('沒有勾選要續報的學生');return;}
+  if(!confirm(`確定將 ${picked.length} 位學生續報到「${target.name}」？${bill?'\n正取學生會同時開立帳單。':''}`)) return;
+  showLoading('續報中…');
+  const added=[];
+  for(const r of picked){
+    if(enrolls.some(e=>e.termId===R.targetId&&e.studentId===r.studentId&&e.sessionId===r.toSessId)) continue;
+    const s=getSess(r.toSessId);
+    const status=s&&getEnrolled(R.targetId,r.toSessId).length>=s.capacity?'waitlist':'enrolled';
+    const e={id:'e'+Date.now()+Math.random().toString(36).slice(2,8),termId:R.targetId,sessionId:r.toSessId,studentId:r.studentId,status,enrollDate:today(),createdAt:today(),source:'renew'};
+    enrolls.push(e); added.push(e);
+  }
+  await saveCol('enrolls',enrolls);
+  let billed=0;
+  if(bill) for(const e of added) if(e.status==='enrolled'&&await autoCreateFeeAfterEnroll(e.studentId,e.sessionId,e.termId)) billed++;
+  hideLoading(); closeMod();
+  renderTerms(); renderDash(); renderStudents(); renderFee();
+  const wait=added.filter(e=>e.status==='waitlist').length;
+  alert(`✓ 已續報 ${added.length} 位學生到「${target.name}」${wait?`\n其中 ${wait} 位因班次額滿列為候補`:''}${bill?`\n已開立帳單 ${billed} 張`:''}`);
+}
+
+// ══════════════════════════════════════════════════════
+// ⑰ 上方按鈕依頁面自動亮起，不再靠按鈕順序（避免亮錯分頁）
+// ══════════════════════════════════════════════════════
+const NAV_PARENT={'term-att':'terms','parent-form':'reg-qr'};
+
+function markNav(tab){
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+  const key=NAV_PARENT[tab]||tab;
+  const btn=[...document.querySelectorAll('.nb')].find(b=>(b.getAttribute('onclick')||'').startsWith(`sw('${key}'`));
+  if(btn) btn.classList.add('active');
+}
 </script>
 </body>
 </html>
