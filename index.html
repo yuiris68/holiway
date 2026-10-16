@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v8.0 BUILD 20261016-CLEANUP -->
+<!-- HOLIWAY v8.1 BUILD 20261016-CLEANUP2 -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v8.0</title>
+<title>哈樂維 v8.1</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -230,7 +230,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.0</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.1</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -628,7 +628,7 @@ const VENUE_COLORS=[
 // tLabel moved to type management section
 
 let venues=[],sessions=[],terms=[],enrolls=[],students=[],signinRec={},makeupRec=[],fees=[],txns=[],pricing=[];
-let coaches=[],subLog=[],pendingSubs=[];
+let coaches=[],pendingSubs=[];
 let sessVenueFilter='all',feeSub='bills';
 let _dirtySigninKeys = new Set(); // 追蹤本次有變動的 signin key，避免全量寫入
 
@@ -3655,16 +3655,15 @@ async function saveCoach(id) {
       if(coaches.some(c=>c.id!==id&&c.name===newName)){alert(`已經有名為「${newName}」的教練`);return;}
       const nS=sessions.filter(s=>s.coach===oldName).length;
       const nM=multiSchedule.filter(s=>s.coach===oldName).length;
-      const nSub=Object.values(signinRec).filter(r=>r&&r._substituteCoach===oldName).length+subLog.filter(x=>x.subCoach===oldName||x.origCoach===oldName).length;
+      const nSub=Object.values(signinRec).filter(r=>r&&r._substituteCoach===oldName).length;
       if(nS+nM+nSub&&!confirm(`教練「${oldName}」改名為「${newName}」，以下資料會一併更新：\n${nS?`・班次 ${nS} 個\n`:''}${nM?`・多元課排課 ${nM} 堂\n`:''}${nSub?`・代課紀錄 ${nSub} 筆\n`:''}\n確定改名？`)) return;
       sessions.forEach(s=>{if(s.coach===oldName)s.coach=newName;});
       multiSchedule.forEach(s=>{if(s.coach===oldName)s.coach=newName;});
       voucherBookings.forEach(b=>{if(b.coach===oldName)b.coach=newName;});
       Object.entries(signinRec).forEach(([k,r])=>{if(r&&r._substituteCoach===oldName){r._substituteCoach=newName;_dirtySigninKeys.add(k);}});
-      subLog.forEach(x=>{if(x.subCoach===oldName)x.subCoach=newName;if(x.origCoach===oldName)x.origCoach=newName;});
       if(COACHES[oldName]&&!COACHES[newName]){COACHES[newName]=COACHES[oldName];}
       await saveCol('sessions',sessions); await saveCol('multiSchedule',multiSchedule); await saveCol('voucherBookings',voucherBookings);
-      await saveSignin(); await saveCol('sublog',subLog);
+      await saveSignin();
     }
     coaches[i]={...coaches[i],...d};
   }
@@ -4087,30 +4086,6 @@ function exportCurrentReport() {
 // ── Override coach monthly count to account for substitute coach ───────────
 
 
-// ── Override report ① to use effective coach ──────────────────────────────
-
-
-// ── Override renderSignin to show substitute notice in stats bar ───────────
-// (We already patched renderSignin above via setTimeout, but also patch stats bar content)
-// We'll inject the sub-coach display by augmenting signinRec display
-// The _substituteCoach key needs to be excluded from present count:
-
-// setSI safety guard (inline)
-
-// Ensure saveSignin stores _substituteCoach correctly (already handled since it's in rec object)
-
-
-// ══════════════════════════════════════════════════════════════════
-// SUBSTITUTE COACH — COMPLETE IMPLEMENTATION
-// Supports: internal coach list + free-text external coach
-// Stats: separate tracking, comparison table, fee calculation
-// ══════════════════════════════════════════════════════════════════
-
-// Substitute log stored separately for history
-// subLog declared in main vars above
-// [{id, sessId, date, origCoach, subCoach, subFee, studentCount, isExternal}]
-
-// Load subLog on init
 // ══════════════════════════════════════════════════════════════════
 // 多元課程使用券系統
 // Collections: voucherPacks, multiSchedule, voucherBookings
@@ -4816,7 +4791,6 @@ async function initApp() {
     startSigninRequestListener();
     await migrateSessionDates();
     coaches     = await fsGet('coaches');
-    subLog      = await fsGet('sublog');
     await loadMultiData();
     await loadCustomTypes(); // ③ 載入自訂課程類型
     const srSnap = await db.collection('signin').get();
@@ -4842,7 +4816,6 @@ async function initApp() {
     if (!pricing.length)  pricing  = JSON.parse(JSON.stringify(SEED_PRICING));
     if (!coaches.length)  coaches  = Object.entries(COACHES).map(([name,d],i)=>({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
     if (!pendingSubs) pendingSubs = [];
-    if (!subLog) subLog = [];
   } finally {
     // ALWAYS run these regardless of success or error
     hideLoading();
@@ -4947,17 +4920,7 @@ async function saveSubCoach() {
   signinRec[curSiKey]._substituteFee       = subFee;
   signinRec[curSiKey]._substituteIsExternal= isExt;
 
-  // Log to subLog for history
-  const s=getSess(curSiSessId);
-  const [,date]=curSiKey.split('|');
-  const existing=subLog.findIndex(x=>x.sessId===curSiSessId&&x.date===date);
-  const entry={id:'sl'+Date.now(),sessId:curSiSessId,date,
-    origCoach:s?s.coach:'',subCoach:subName,subFee,isExternal:isExt,
-    sessName:s?s.name+' '+s.day+' '+s.time:'',createdAt:today()};
-  if(existing>=0) subLog[existing]=entry; else subLog.push(entry);
-
   await saveSignin();
-  await saveCol('sublog',subLog);
   showSubCoachConfirmed(subName, subFee, isExt);
   hint('代課教練已設定 ✓');
 }
@@ -4971,10 +4934,7 @@ async function clearSubCoach() {
   }
   const sel=document.getElementById('sub-coach-sel');const input=document.getElementById('sub-coach-input');const feeEl=document.getElementById('sub-coach-fee');
   if(sel)sel.value=''; if(input)input.value=''; if(feeEl)feeEl.value='';
-  // Remove from subLog
-  const [,date]=curSiKey.split('|');
-  subLog=subLog.filter(x=>!(x.sessId===curSiSessId&&x.date===date));
-  await saveSignin(); await saveCol('sublog',subLog);
+  await saveSignin();
   hideSubCoachConfirmed(); hint('代課已清除');
 }
 
