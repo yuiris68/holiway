@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v8.1.4 BUILD 20261113-PASSWORD -->
+<!-- HOLIWAY v8.2.1 BUILD 20261113-ROLES-ADJ -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v8.1.4</title>
+<title>哈樂維 v8.2.1</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -231,7 +231,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.1.4</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.2.1</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -601,7 +601,7 @@ async function fsSave(col, items) {
         let before=null; try{ before=op.prev?JSON.parse(op.prev):null; }catch(e){}
         const action = op.type==='del' ? 'delete' : before ? 'update' : 'create';
         const entry = auditEntry(col, op.id, action, before, op.type==='set'?JSON.parse(op.s):null);
-        if (action!=='update' || entry.changes.length) batch.set(db.collection('auditLog').doc(entry.id), entry);
+        if (action!=='update' || entry.changes.length) batch.set(db.collection(auditColFor(col)).doc(entry.id), entry);
       }
     });
     await batch.commit();
@@ -705,7 +705,7 @@ function getSt(id){return students.find(s=>s.id===id)||{name:'?'};}
 function getSess(id){return sessions.find(s=>s.id===id);}
 function getVenue(id){return venues.find(v=>v.id===id);}
 function termProgress(t){const s=new Date(t.startDate),e=new Date(t.endDate),n=new Date(today());if(n<s)return 0;if(n>e)return 100;return Math.round((n-s)/(e-s)*100);}
-function getSessPrice(sid){const p=pricing.find(x=>x.sessId===sid);return p?p.price:null;}
+function getSessPrice(sid){if(myAccount&&!can('money'))return null;const p=pricing.find(x=>x.sessId===sid);return p?p.price:null;}
 function feeStatus(f){
   const refund=txns.filter(t=>t.feeId===f.id&&t.type==='refund').reduce((a,b)=>a+b.amount,0);
   if(f.status==='void')return{cls:'pill-gray',label:'已作廢',paid:0,net:0,bal:0,pct:100,voided:true,closed:true,refund};
@@ -1001,7 +1001,7 @@ function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
 function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>填單人數上限 <span style="font-size:10px;color:#999;font-weight:400">（審核前最多收件數）</span></label><input type="number" id="sf-form-limit" value="${d.formLimit||d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()" placeholder="同滿班人數"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>班次狀態</label><select id="sf-status"><option value="active" ${d.status!=='inactive'?'selected':''}>開課中</option><option value="inactive" ${d.status==='inactive'?'selected':''}>停用（不再開課，歷史資料保留）</option></select></div><div class="info-box" style="margin-bottom:8px">📅 各期的實際上課日期，請到「期別/報名」→ 該期的「課程日期」設定，每一期分開記錄，不會互相影響。</div>
-<div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
+<div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" ${can('admin')?'':'disabled title="只有管理者可以修改學費"'} placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
 function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,formLimit:parseInt(document.getElementById('sf-form-limit')?.value)||parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,status:document.getElementById('sf-status')?.value||'active',price:parseFloat(document.getElementById('sf-price').value)||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0){sessions[i]={...sessions[i],...d};delete sessions[i].startDate;delete sessions[i].endDate;}if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}else{// ③ 定價清空時刪除舊的 pricing，避免開帳單帶入舊金額
@@ -1404,7 +1404,7 @@ function rosterEditStudent(stId, termId) {
     </div>
     <div class="fg">
       <div class="fr"><label>家長姓名</label><input type="text" id="re-p" value="${st.parent||''}"></div>
-      <div class="fr"><label>聯絡電話</label><input type="tel" id="re-ph" value="${st.phone||''}"></div>
+      <div class="fr"><label>聯絡電話</label><input type="tel" id="re-ph" value="${st.phone||''}" ${!can('admin')?'disabled title="只有管理者可以修改家長電話"':''}></div>
     </div>
     <div class="fr"><label>LINE ID</label><input type="text" id="re-line" value="${st.lineId||''}"></div>
     <div style="display:flex;gap:6px">
@@ -1644,6 +1644,7 @@ async function deleteMakeup(mkId) {
 // ── FEE ──────────────────────────────────────────────
 
 function renderFee(){
+  try{ renderRefundReqArea(); }catch(e){}
   const tF = document.getElementById('fee-term-filter').value;
   const sF = document.getElementById('fee-status-filter').value;
   let list = [...fees].sort((a,b)=>(b.issuedDate||b.id||'').localeCompare(a.issuedDate||a.id||''));
@@ -1855,7 +1856,7 @@ function ifSessChange(){
 
   ifPrev();
 }
-function ifPrev(){const a=parseFloat(document.getElementById('if-amt').value)||0,d=parseFloat(document.getElementById('if-disc').value)||0;document.getElementById('if-prev').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">費用</span><span>${fmt(a)}</span></div>${d>0?`<div class="rrow"><span style="color:#999">折扣</span><span style="color:#A32D2D">-${fmt(d)}</span></div>`:''}<div class="rrow rtotal"><span>應繳</span><span>${fmt(a-d)}</span></div></div>`;}
+function ifPrev(){if(!document.getElementById('if-amt')||!document.getElementById('if-prev'))return;const a=parseFloat(document.getElementById('if-amt').value)||0,d=parseFloat(document.getElementById('if-disc').value)||0;document.getElementById('if-prev').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">費用</span><span>${fmt(a)}</span></div>${d>0?`<div class="rrow"><span style="color:#999">折扣</span><span style="color:#A32D2D">-${fmt(d)}</span></div>`:''}<div class="rrow rtotal"><span>應繳</span><span>${fmt(a-d)}</span></div></div>`;}
 async function issueFee(){const stId=document.getElementById('if-stu').value,amt=parseFloat(document.getElementById('if-amt').value)||0,disc=parseFloat(document.getElementById('if-disc').value)||0;if(!stId||amt<=0){alert('請選擇學生並輸入金額');return;}const sessId=document.getElementById('if-sess').value||null;const termId=document.getElementById('if-term').value||null;const term=terms.find(t=>t.id===termId);const fee={id:'f'+Date.now(),studentId:stId,termId,sessionId:sessId,amount:amt,description:document.getElementById('if-note').value||'課程費用',dueDate:document.getElementById('if-due').value,issuedDate:today(),termStartDate:term?.startDate||null,termEndDate:term?.endDate||null};fees.push(fee);if(disc>0)txns.push({id:'t'+Date.now(),feeId:fee.id,studentId:stId,type:'disc',amount:disc,date:today(),method:'—',note:'開帳折扣'});await saveCol('fees',fees);await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
 function openPayMod(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);document.getElementById('mod-title').textContent='收款 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">應繳</span><span>${fmt(s.net)}</span></div><div class="rrow"><span style="color:#999">已繳</span><span style="color:#27500A">${fmt(s.paid)}</span></div><div class="rrow rtotal"><span>尚欠</span><span style="color:#A32D2D">${fmt(s.bal)}</span></div></div><div class="fg"><div class="fr"><label>收款金額</label><input type="number" id="pay-amt" value="${s.bal}" min="1"></div><div class="fr"><label>付款方式</label><select id="pay-meth"><option>現金</option><option>轉帳</option><option>LINE Pay</option><option>信用卡</option></select></div></div><div class="fg"><div class="fr"><label>日期</label><input type="date" id="pay-date" value="${today()}"></div><div class="fr"><label>備註</label><input type="text" id="pay-note"></div></div><button class="btn btn-green" style="width:100%" onclick="recordPay('${feeId}')">確認收款</button>`;document.getElementById('overlay').style.display='flex';}
 async function recordPay(feeId){const amt=parseFloat(document.getElementById('pay-amt').value)||0;if(amt<=0){alert('請輸入金額');return;}const f=fees.find(x=>x.id===feeId);txns.push({id:'t'+Date.now(),feeId,studentId:f?f.studentId:'',type:'pay',amount:amt,method:document.getElementById('pay-meth').value,date:document.getElementById('pay-date').value,note:document.getElementById('pay-note').value});await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
@@ -1871,7 +1872,7 @@ function openRefundMod(feeId){
   </div>
   <div class="fr"><label>退費原因 *</label><select id="ref-reason-sel" onchange="document.getElementById('ref-reason').value=this.value==='other'?'':this.value"><option value="">請選擇原因</option><option value="家長退選課程">家長退選課程</option><option value="課程取消">課程取消</option><option value="減少堂數">減少堂數</option><option value="身體不適無法上課">身體不適無法上課</option><option value="搬家 / 住址異動">搬家 / 住址異動</option><option value="other">其他（自填）</option></select></div>
   <div class="fr"><label>退費原因（詳述）</label><input type="text" id="ref-reason" placeholder="請填寫退費原因"></div>
-  <button class="btn btn-red" style="width:100%" onclick="recordRefund('${feeId}')">確認退費</button>`;
+  <button class="btn btn-red" style="width:100%" onclick="recordRefund('${feeId}')">${can('admin')?'確認退費':'送出退費申請（需管理者核准）'}</button>`;
   window._refTouched=false;
   document.getElementById('overlay').style.display='flex';
 }
@@ -1883,20 +1884,28 @@ function refAutoMode(paid){
   const r=document.querySelector(`input[name="ref-mode"][value="${v}"]`); if(r) r.checked=true;
 }
 async function recordRefund(feeId){
-  const f=fees.find(x=>x.id===feeId);if(!f)return;
-  const s=feeStatus(f);
-  const amt=parseFloat(document.getElementById('ref-amt').value)||0;
-  const reason=document.getElementById('ref-reason').value.trim();
-  const mode=document.querySelector('input[name="ref-mode"]:checked')?.value||'void';
-  if(amt<=0){alert('請輸入退費金額');return;}
-  if(amt>s.paid){alert('退費金額不能超過已收款 '+fmt(s.paid));return;}
-  if(!reason){alert('請填寫退費原因');return;}
-  if(mode==='void'&&amt<s.paid&&!confirm(`退費 ${fmt(amt)}，保留 ${fmt(s.paid-amt)} 不退，並作廢帳單？`))return;
-  txns.push({id:'t'+Date.now(),feeId,studentId:f.studentId,type:'refund',amount:amt,date:document.getElementById('ref-date').value,note:reason+(mode==='partial'?'（部分退費）':''),method:'退費'});
-  if(mode==='void') f.status='refunded';
-  await saveCol('fees',fees);await saveCol('txns',txns);
+  const f=fees.find(x=>x.id===feeId); if(!f) return;
+  const s=feeStatus(f); const r=readRefundForm();
+  if(r.amt<=0){alert('請輸入退費金額');return;}
+  if(r.amt>s.paid){alert('退費金額不能超過已收款 '+fmt(s.paid));return;}
+  if(!r.reason){alert('請填寫退費原因');return;}
+  if(!can('admin')){
+    if(refundReqs.some(x=>x.feeId===feeId&&x.status==='pending')){alert('這張帳單已經有一筆待核准的退費申請');return;}
+    const req={id:'rr'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),feeId,studentId:f.studentId,amount:r.amt,mode:r.mode,reason:r.reason,date:r.date,
+      feeLabel:String(auditDocLabel('fees',f,f.id)).slice(0,120),requestedBy:auth.currentUser?.email||'',requestedAt:new Date().toISOString(),status:'pending'};
+    try{
+      await db.collection('refundReqs').doc(req.id).set(req);
+      refundReqs.push(req);
+      await auditNote('refundReqs',req.id,req.feeLabel,'create',[{f:'amount',label:'申請退費',from:'',to:fmt(r.amt)},{f:'reason',label:'原因',from:'',to:r.reason}]);
+      closeMod(); renderFee();
+      alert('已送出退費申請，等待管理者核准。');
+    }catch(e){ alert('送出失敗：'+(e&&e.message||e)); }
+    return;
+  }
+  if(r.mode==='void'&&r.amt<s.paid&&!confirm(`退費 ${fmt(r.amt)}，保留 ${fmt(s.paid-r.amt)} 不退，並作廢帳單？`))return;
+  await executeRefund(f,r,null);
   closeMod();renderFee();renderStudents();renderDash();
-  hint(mode==='void'?'已退費，帳單已作廢 ✓':'已部分退費，應繳金額已調整 ✓');
+  hint(r.mode==='void'?'已退費，帳單已作廢 ✓':'已部分退費，應繳金額已調整 ✓');
 }
 function openFeeHist(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);const rel=txns.filter(t=>t.feeId===feeId).sort((a,b)=>b.date.localeCompare(a.date));document.getElementById('mod-title').textContent='帳單明細 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">說明</span><span>${f.description}</span></div>${f.termStartDate?`<div class="rrow"><span style="color:#999">上課期間</span><span>${fmtD(f.termStartDate)} — ${fmtD(f.termEndDate)}</span></div>`:''}<div class="rrow rtotal"><span>餘額</span><span style="color:${s.bal>0?'#A32D2D':'#27500A'}">${s.bal>0?fmt(s.bal):'結清'}</span></div></div>${s.paid>s.net&&!f.status?`<div style="background:#FCEBEB;color:#501313;border-radius:8px;padding:7px 10px;font-size:11px;margin-bottom:8px">⚠ 換班後溢繳 ${fmt(s.paid-s.net)}，請退還差額</div>`:''}${(f.history||[]).length?`<div style="background:#E6F1FB;border-radius:8px;padding:7px 10px;font-size:11px;color:#0C447C;margin-bottom:8px"><div style="font-weight:500;margin-bottom:3px">調整紀錄</div>${f.history.map(x=>`<div>${x.date} ${x.type}：${x.from} → ${x.to}（${fmt(x.oldAmount)} → ${fmt(x.newAmount)}）</div>`).join('')}</div>`:''}${rel.map(t=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:0.5px solid #e0e0e0"><div style="flex:1"><div style="font-size:12px">${{pay:'收款',disc:'折扣',refund:'退費'}[t.type]||t.type}${t.note?' · '+t.note:''}</div><div style="font-size:10px;color:#999">${t.date} · ${t.method||'—'}</div></div><div style="font-size:13px;font-weight:500;color:${t.type==='pay'?'#27500A':'#A32D2D'}">${t.type==='pay'?'+':'-'}${fmt(t.amount)}</div></div>`).join('')||'<div class="empty">尚無交易</div>'}${s.bal>0&&!f.status?`<button class="btn btn-green" style="width:100%;margin-top:8px" onclick="closeMod();openPayMod('${feeId}')">收款</button>`:''}<button class="btn btn-outline" style="width:100%;margin-top:6px;font-size:12px" onclick="openDocHistory('fees','${feeId}','帳單')">📋 這張帳單的修改歷史</button>`;document.getElementById('overlay').style.display='flex';}
 // 原本的「刪除帳單」：改為作廢，帳單與相關紀錄全部保留
@@ -2149,8 +2158,8 @@ function renderStudents(){try{updateOrphanBtn();}catch(e){}const q=(document.get
         const editEnrollBtn = '<button onclick="openEditEnroll(&quot;'+e.id+'&quot;)" style="font-size:9px;background:none;border:none;cursor:pointer;color:#999;padding:0 2px" title="調整">✎</button>';
         return s?'<span style="font-size:11px;padding:3px 8px;border-radius:7px;background:'+(isWait?'#FFF8F0':'#f8f8f8')+';display:inline-flex;align-items:center;margin:2px 2px 0 0;white-space:nowrap;border:0.5px solid '+(isWait?'#F0C080':'transparent')+'">'+(v?'['+v.shortName+'] ':'')+( t?'<span style="color:#888;font-size:10px;margin-right:2px">'+t.name+'</span> ':'')+s.name+' '+s.day+' '+s.time+(pr!=null?' <span style="color:#27500A;margin-left:3px">'+fmt(pr)+'</span>':'')+waitTag+feeTag+editEnrollBtn+'</span>':'';
       }).join('')||'<span style="font-size:11px;color:#999">未報名</span>'}</div><div style="display:flex;gap:5px"><button class="btn btn-pink" style="font-size:11px;padding:3px 8px" onclick="openIssueFeeForStudent('${st.id}')">開帳單</button><button class="btn btn-outline" style="font-size:11px;padding:2px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openEnrollForStudent('${st.id}')">+ 報名期別</button></div></div>`;}).join('');}
-function stuFormHTML(d){return`<div class="section-div">孩子資料</div><div class="fg"><div class="fr"><label>孩子姓名 *</label><input type="text" id="ns-n" value="${d.name||''}" placeholder="姓名"></div><div class="fr"><label>孩子性別</label><select id="ns-g"><option value="" ${!d.gender?'selected':''}>不填</option><option value="male" ${d.gender==='male'?'selected':''}>男生</option><option value="female" ${d.gender==='female'?'selected':''}>女生</option></select></div></div><div class="fg3"><div class="fr"><label>年齡（歲）</label><input type="number" id="ns-ay" value="${d.ageY||''}" min="0" max="18" placeholder="Y"></div><div class="fr"><label>年齡（月）</label><input type="number" id="ns-am" value="${d.ageM||''}" min="0" max="11" placeholder="M"></div><div class="fr"><label>身高（cm）</label><input type="number" id="ns-h" value="${d.height||''}" min="50" max="200" placeholder="cm"></div></div><div class="section-div">家長資料</div><div class="fg"><div class="fr"><label>家長姓名</label><input type="text" id="ns-p" value="${d.parent||''}" placeholder="家長姓名"></div><div class="fr"><label>聯絡電話</label><input type="tel" id="ns-ph" value="${d.phone||''}" placeholder="手機號碼"></div></div><div class="fr"><label>家長 LINE ID</label><input type="text" id="ns-line" value="${d.lineId||''}" placeholder="LINE ID"></div><div class="section-div">學生課程</div><div class="fr"><label>報名期別</label><select id="ns-term" onchange="nsFilterSess()"><option value="">— 選擇期別 —</option>${terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${(d.termId||'')==t.id?'selected':''} ${termStatus(t).key==='active'&&!d.termId?'selected':''} >${t.name}</option>`).join('')}</select></div><div class="fr"><label>選擇課程（自動帶入堂數）</label><select id="ns-sess" onchange="nsAutoLessons()"><option value="">— 未指定 —</option>${sessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" ${(d.sessionId||'')==s.id?'selected':''}>${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;}).join('')}</select></div><div id="ns-lessons-display" style="background:#EAF3DE;border-radius:8px;padding:7px 9px;font-size:11px;color:#27500A;margin-bottom:2px;display:none">自動帶入每期堂數：<strong id="ns-lessons-val"></strong></div><div class="fr"><label>每期堂數（可手動調整）</label><select id="ns-l">${LESSON_OPTIONS.map(n=>`<option value="${n}" ${(d.period||6)===n?'selected':''}>${n} 堂</option>`).join('')}</select></div>`;}
-function nsAutoLessons(){const sel=document.getElementById('ns-sess');const opt=sel.options[sel.selectedIndex];const lessons=opt&&opt.dataset.lessons?parseInt(opt.dataset.lessons):null;const display=document.getElementById('ns-lessons-display');const val=document.getElementById('ns-lessons-val');const lSel=document.getElementById('ns-l');if(lessons&&lessons>0){display.style.display='block';val.textContent=lessons+' 堂/期';if(lSel)lSel.value=lessons;}else{display.style.display='none';}}
+function stuFormHTML(d){return`<div class="section-div">孩子資料</div><div class="fg"><div class="fr"><label>孩子姓名 *</label><input type="text" id="ns-n" value="${d.name||''}" placeholder="姓名"></div><div class="fr"><label>孩子性別</label><select id="ns-g"><option value="" ${!d.gender?'selected':''}>不填</option><option value="male" ${d.gender==='male'?'selected':''}>男生</option><option value="female" ${d.gender==='female'?'selected':''}>女生</option></select></div></div><div class="fg3"><div class="fr"><label>年齡（歲）</label><input type="number" id="ns-ay" value="${d.ageY||''}" min="0" max="18" placeholder="Y"></div><div class="fr"><label>年齡（月）</label><input type="number" id="ns-am" value="${d.ageM||''}" min="0" max="11" placeholder="M"></div><div class="fr"><label>身高（cm）</label><input type="number" id="ns-h" value="${d.height||''}" min="50" max="200" placeholder="cm"></div></div><div class="section-div">家長資料</div><div class="fg"><div class="fr"><label>家長姓名</label><input type="text" id="ns-p" value="${d.parent||''}" placeholder="家長姓名"></div><div class="fr"><label>聯絡電話</label><input type="tel" id="ns-ph" value="${d.phone||''}" ${d.id&&!can('admin')?'disabled title="只有管理者可以修改家長電話"':''} placeholder="手機號碼"></div></div><div class="fr"><label>家長 LINE ID</label><input type="text" id="ns-line" value="${d.lineId||''}" placeholder="LINE ID"></div><div class="section-div">學生課程</div><div class="fr"><label>報名期別</label><select id="ns-term" onchange="nsFilterSess()"><option value="">— 選擇期別 —</option>${terms.sort((a,b)=>a.startDate.localeCompare(b.startDate)).map(t=>`<option value="${t.id}" ${(d.termId||'')==t.id?'selected':''} ${termStatus(t).key==='active'&&!d.termId?'selected':''} >${t.name}</option>`).join('')}</select></div><div class="fr"><label>選擇課程（自動帶入堂數）</label><select id="ns-sess" onchange="nsAutoLessons()"><option value="">— 未指定 —</option>${sessions.sort((a,b)=>(DAY_ORDER[a.day]||9)-(DAY_ORDER[b.day]||9)).map(s=>{const v=getVenue(s.venueId);const pr=getSessPrice(s.id);return`<option value="${s.id}" data-lessons="${s.periodLessons}" ${(d.sessionId||'')==s.id?'selected':''}>${v?'['+v.shortName+'] ':''}${s.name} · ${s.day} ${s.time} (${s.periodLessons}堂${pr!=null?' · '+fmt(pr):''})</option>`;}).join('')}</select></div><div id="ns-lessons-display" style="background:#EAF3DE;border-radius:8px;padding:7px 9px;font-size:11px;color:#27500A;margin-bottom:2px;display:none">自動帶入每期堂數：<strong id="ns-lessons-val"></strong></div><div class="fr"><label>每期堂數（可手動調整）</label><select id="ns-l">${LESSON_OPTIONS.map(n=>`<option value="${n}" ${(d.period||6)===n?'selected':''}>${n} 堂</option>`).join('')}</select></div>`;}
+function nsAutoLessons(){const sel=document.getElementById('ns-sess');if(!sel)return;const opt=sel.options[sel.selectedIndex];const lessons=opt&&opt.dataset.lessons?parseInt(opt.dataset.lessons):null;const display=document.getElementById('ns-lessons-display');const val=document.getElementById('ns-lessons-val');const lSel=document.getElementById('ns-l');if(lessons&&lessons>0){display.style.display='block';val.textContent=lessons+' 堂/期';if(lSel)lSel.value=lessons;}else{display.style.display='none';}}
 
 
 function getStuData(){
@@ -3205,7 +3214,7 @@ async function approveReg(pendingId) {
   let st=existing;
   if(st){
     // 舊生：以這次填寫的最新資料更新聯絡方式與身高年齡
-    ['parentName:parent','phone:phone','lineId:lineId','gender:gender'].forEach(m=>{const [a,b]=m.split(':');if(p[a])st[b]=p[a];});
+    ['parentName:parent','phone:phone','lineId:lineId','gender:gender'].forEach(m=>{const [a,b]=m.split(':');if(b==='phone'&&!can('admin'))return;if(p[a])st[b]=p[a];});
     if(p.height) st.height=p.height;
     if(p.ageY||p.ageM){st.ageY=p.ageY;st.ageM=p.ageM;}
   }else{
@@ -4171,7 +4180,7 @@ let voucherBookings = [];  // 預約記錄
 // ── 初始化載入 ────────────────────────────────────────────────────
 async function loadMultiData() {
   try {
-    voucherPacks    = await fsGet('voucherPacks');
+    voucherPacks    = can('money') ? await fsGet('voucherPacks') : [];
     multiSchedule   = await fsGet('multiSchedule');
     voucherBookings = await fsGet('voucherBookings');
   } catch(e) {
@@ -4734,7 +4743,7 @@ function renderSlotAttBody(slotId, bookings) {
 async function setSlotAtt(slotId, bookingId, status) {
   const b = voucherBookings.find(x=>x.id===bookingId); if (!b) return;
   const prev = b.status;
-  if (status === 'attended' && prev !== 'attended' && getStudentValidRemaining(b.studentId) <= 0) {
+  if (status === 'attended' && prev !== 'attended' && can('money') && getStudentValidRemaining(b.studentId) <= 0) {
     if (!confirm(`${getSt(b.studentId).name} 目前沒有有效使用券。\n仍要記為出席嗎？會先記為「欠券 1 張」，之後購券時自動扣抵。`)) return;
   }
   b.status = status;
@@ -4854,20 +4863,22 @@ async function initApp() {
     venues      = await fsGet('venues');
     let vNeedsSave=false;
     venues.forEach((v,i)=>{if(v.order==null){v.order=i+1;vNeedsSave=true;}});
-    if(vNeedsSave) await saveCol('venues',venues);
+    if(vNeedsSave&&can('admin')) await saveCol('venues',venues);
     sessions    = await fsGet('sessions');
     terms       = await fsGet('terms');
     enrolls     = await fsGet('enrolls');
     students    = await fsGet('students');
     makeupRec   = await fsGet('makeup');
-    fees        = await fsGet('fees');
-    txns        = await fsGet('txns');
+    // v8.2：依身份載入，看不到的資料不讀取（安全規則也會擋）
+    fees        = can('money') ? await fsGet('fees') : [];
+    txns        = can('money') ? await fsGet('txns') : [];
+    if (can('money')) await loadRefundReqs();
     pricing     = await fsGet('pricing');
-    pendingSubs = await fsGet('pending');
-    startPendingListener();
-    loadBackupInfo();
-    startSigninRequestListener();
-    await migrateSessionDates();
+    pendingSubs = can('edit') ? await fsGet('pending') : [];
+    if (can('edit')) startPendingListener();
+    if (can('admin')) loadBackupInfo();
+    if (can('attend')) startSigninRequestListener();
+    if (can('edit')) await migrateSessionDates();
     coaches     = await fsGet('coaches');
     await loadMultiData();
     await loadCustomTypes(); // ③ 載入自訂課程類型
@@ -4876,11 +4887,11 @@ async function initApp() {
     srSnap.docs.forEach(d => { signinRec[d.id] = d.data(); });
     rememberSignin();
     // Seed defaults if empty
-    if (!venues.length)   { venues   = JSON.parse(JSON.stringify(SEED_VENUES));   await fsSave('venues',   venues);   }
-    if (!sessions.length) { sessions = JSON.parse(JSON.stringify(SEED_SESSIONS)); await fsSave('sessions', sessions); }
-    if (!terms.length)    { terms    = makeSeedTerms();                            await fsSave('terms',    terms);    }
-    if (!pricing.length)  { pricing  = JSON.parse(JSON.stringify(SEED_PRICING));  await fsSave('pricing',  pricing);  }
-    if (!coaches.length)  {
+    if (can('admin') && !venues.length)   { venues   = JSON.parse(JSON.stringify(SEED_VENUES));   await fsSave('venues',   venues);   }
+    if (can('admin') && !sessions.length) { sessions = JSON.parse(JSON.stringify(SEED_SESSIONS)); await fsSave('sessions', sessions); }
+    if (can('admin') && !terms.length)    { terms    = makeSeedTerms();                            await fsSave('terms',    terms);    }
+    if (can('admin') && !pricing.length)  { pricing  = JSON.parse(JSON.stringify(SEED_PRICING));  await fsSave('pricing',  pricing);  }
+    if (can('admin') && !coaches.length)  {
       coaches = Object.entries(COACHES).map(([name,d],i) => ({id:'c'+i,name,color:d.color,role:'教練',phone:'',note:'',active:true}));
       await saveCol('coaches', coaches);
     }
@@ -5043,7 +5054,7 @@ function renderCoaches() {
   const body = document.getElementById('coaches-body');
   if (!body) return;
   // Auto-seed from COACHES constant if empty
-  if (!coaches.length) {
+  if (!coaches.length && can('admin')) {
     coaches = Object.entries(COACHES).map(([name,d],i) => ({
       id:'c'+i, name, color:d.color, role:'教練', phone:'', note:'', active:true
     }));
@@ -5098,6 +5109,7 @@ function renderCoaches() {
 
 // ── Report ①: Attendance with sub comparison & fee calc ──────────
 function calcReportAtt() {
+  if(!lockCoachReport()) return;
   const from  =document.getElementById('att-from')?.value||'';
   const to    =document.getElementById('att-to')?.value||'';
   const coachF=document.getElementById('att-coach')?.value||'';
@@ -6104,7 +6116,7 @@ async function assignSigninRequest(reqId){
   if(!stId){alert('請先選擇學生');return;}
   const st=students.find(s=>s.id===stId);
   // 順便把家長填的電話補進學生資料，下次就能自動比對
-  if(st&&r.phone&&!_digits(st.phone)){st.phone=r.phone;await saveCol('students',students);}
+  if(st&&r.phone&&!_digits(st.phone)&&can('admin')){st.phone=r.phone;await saveCol('students',students);}
   await applyRequestSignin(r,stId,'manual');
   renderSigninRequests(); hint('已記出席 ✓');
 }
@@ -6370,7 +6382,9 @@ async function checkAdmin(user){
       const inv=await db.collection('invites').doc(email).get().catch(()=>null);
       if(inv&&inv.exists){
         const i=inv.data()||{};
-        const doc={email:user.email,name:i.name||email,role:i.role||'staff',active:true,createdBy:i.createdBy||'',createdAt:new Date().toISOString(),via:'invite'};
+        const roles=Array.isArray(i.roles)&&i.roles.length?i.roles:[i.role||'staff'];
+        const doc={email:user.email,name:i.name||email,role:roles[0],roles,active:true,createdBy:i.createdBy||'',createdAt:new Date().toISOString(),via:'invite'};
+        if(i.coachName) doc.coachName=i.coachName;
         await ref.set(doc);
         await db.collection('invites').doc(email).delete().catch(()=>{});
         myAccount={uid:user.uid,...doc};
@@ -6394,7 +6408,7 @@ function showNotAuthorized(user, kind){
 // ══════════════════════════════════════════════════════
 // v8.1.1 ② 備份：一鍵匯出全部資料、匯入還原、逾期提醒
 // ══════════════════════════════════════════════════════
-const BACKUP_COLS=['venues','sessions','terms','enrolls','students','makeup','fees','txns','pricing','pending','coaches','voucherPacks','multiSchedule','voucherBookings','signin','sessionTypes','signinRequests','regStats','settings'];
+const BACKUP_COLS=['venues','sessions','terms','enrolls','students','makeup','fees','txns','pricing','pending','coaches','voucherPacks','multiSchedule','voucherBookings','signin','sessionTypes','signinRequests','regStats','settings','refundReqs'];
 
 const BACKUP_REMIND_DAYS=7;
 
@@ -6538,9 +6552,12 @@ function stampCreator(col, arr){
 // v8.1.2 操作紀錄：每次儲存自動記下「誰、何時、改了哪一筆的哪些欄位」
 // 紀錄存在 auditLog，安全規則只允許新增，不能修改或刪除
 // ══════════════════════════════════════════════════════
-const AUDIT_SKIP=new Set(['auditLog','regStats','settings']);
+const AUDIT_SKIP=new Set(['auditLog','auditLogMoney','regStats','settings']);
+// 金額相關資料的紀錄另存 auditLogMoney，教練與客服讀不到
+const AUDIT_MONEY_COLS=new Set(['fees','txns','refundReqs','voucherPacks','pricing']);
+function auditColFor(col){ return AUDIT_MONEY_COLS.has(col)?'auditLogMoney':'auditLog'; }
 
-const AUDIT_COL_LABEL={students:'學生',enrolls:'報名',fees:'帳單',txns:'收款紀錄',terms:'期別',sessions:'班次',venues:'場地',pricing:'學費設定',makeup:'補課',pending:'家長報名表',coaches:'教練',voucherPacks:'使用券',voucherBookings:'多元課預約',multiSchedule:'多元課排課',signin:'簽到',sessionTypes:'課程類型',signinRequests:'掃碼簽到',backup:'備份與還原',admins:'帳號'};
+const AUDIT_COL_LABEL={students:'學生',enrolls:'報名',fees:'帳單',txns:'收款紀錄',terms:'期別',sessions:'班次',venues:'場地',pricing:'學費設定',makeup:'補課',pending:'家長報名表',coaches:'教練',voucherPacks:'使用券',voucherBookings:'多元課預約',multiSchedule:'多元課排課',signin:'簽到',sessionTypes:'課程類型',signinRequests:'掃碼簽到',backup:'備份與還原',admins:'帳號',refundReqs:'退費申請'};
 
 const AUDIT_FIELD_LABEL={name:'名稱',status:'狀態',amount:'金額',sessionId:'班次',studentId:'學生',termId:'期別',description:'說明',dueDate:'繳費期限',phone:'電話',parent:'家長',lineId:'LINE',gender:'性別',ageY:'年齡(歲)',ageM:'年齡(月)',height:'身高',capacity:'滿班人數',formLimit:'填單上限',periodLessons:'每期堂數',coach:'教練',day:'星期',time:'時段',venueId:'場地',price:'學費',startDate:'開始日',endDate:'結束日',enrollStartDate:'報名開始',enrollEndDate:'報名截止',preRegStartDate:'預報名開始',sessions:'班次',holidays:'休課日',sessionDates:'課程日期',makeupSessionId:'補課班次',makeupDate:'補課日期',leaveDate:'請假日',type:'類型',method:'方式',note:'備註',date:'日期',voidReason:'作廢原因',courses:'課程',quantity:'張數',expiryDate:'到期日',history:'調整紀錄',leaveMax:'可補次數',active:'授課中'};
 
@@ -6627,7 +6644,7 @@ async function auditNote(col, docId, label, action, changes){
   try{
     const e=auditEntry(col,docId,action,null,null);
     e.label=label; e.changes=changes||[];
-    await db.collection('auditLog').doc(e.id).set(e);
+    await db.collection(auditColFor(col)).doc(e.id).set(e);
   }catch(err){ console.warn('auditNote',err); }
 }
 
@@ -6665,7 +6682,7 @@ function openAuditLog(){
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
       <select id="al-by" onchange="renderAuditList()" style="width:auto;font-size:12px"><option value="">全部人員</option></select>
-      <select id="al-col" onchange="renderAuditList()" style="width:auto;font-size:12px"><option value="">全部類型</option>${Object.entries(AUDIT_COL_LABEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+      <select id="al-col" onchange="renderAuditList()" style="width:auto;font-size:12px"><option value="">全部類型</option>${Object.entries(AUDIT_COL_LABEL).filter(([k])=>can('money')||!AUDIT_MONEY_COLS.has(k)).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
       <select id="al-act" onchange="renderAuditList()" style="width:auto;font-size:12px"><option value="">全部動作</option><option value="create">新增</option><option value="update">修改</option><option value="delete">刪除</option></select>
       <input type="text" id="al-q" placeholder="搜尋學生、班次…" oninput="renderAuditList()" style="flex:1;min-width:120px;font-size:12px">
     </div>
@@ -6674,14 +6691,17 @@ function openAuditLog(){
   loadAuditLog();
 }
 
+// ── 操作紀錄：管理者看全部，行政只看自己的 ──
 async function loadAuditLog(){
   const from=document.getElementById('al-from').value, to=document.getElementById('al-to').value;
   const el=document.getElementById('al-list'); el.innerHTML='<div class="empty">查詢中…</div>';
   try{
-    const toEnd=new Date(to+'T23:59:59.999');const fromStart=new Date(from+'T00:00:00');
-    const snap=await db.collection('auditLog').where('at','>=',fromStart.toISOString()).where('at','<=',toEnd.toISOString()).orderBy('at','desc').limit(500).get();
+    const toEnd=new Date(to+'T23:59:59.999').toISOString(), fromStart=new Date(from+'T00:00:00').toISOString();
+    const q=c=>db.collection(c).where('at','>=',fromStart).where('at','<=',toEnd).orderBy('at','desc').limit(500).get();
+    const snaps=await Promise.all([q('auditLog'),...(can('money')?[q('auditLogMoney')]:[])]);
+    const rows=snaps.flatMap(s=>s.docs.map(d=>d.data())).sort((a,b)=>b.at.localeCompare(a.at)).slice(0,500);
     if(!document.getElementById('al-list')) return;
-    _auditRows=snap.docs.map(d=>d.data());
+    _auditRows=rows;
     const people=[...new Set(_auditRows.map(r=>r.by).filter(Boolean))].sort();
     const sel=document.getElementById('al-by');const cur=sel.value;
     sel.innerHTML='<option value="">全部人員</option>'+people.map(p=>`<option value="${p}" ${p===cur?'selected':''}>${p}</option>`).join('');
@@ -6704,7 +6724,7 @@ async function openDocHistory(col, docId, title){
   document.getElementById('mod-body').innerHTML='<div class="empty">查詢中…</div>';
   document.getElementById('overlay').style.display='flex';
   try{
-    const snap=await db.collection('auditLog').where('docKey','==',col+'/'+docId).limit(200).get();
+    const snap=await db.collection(auditColFor(col)).where('docKey','==',col+'/'+docId).limit(200).get();
     const rows=snap.docs.map(d=>d.data()).sort((a,b)=>b.at.localeCompare(a.at));
     if(!modStillShows(myTitle)) return;
     document.getElementById('mod-body').innerHTML=rows.length?rows.map(r=>auditRowHTML(r,false)).join(''):'<div class="empty">還沒有修改紀錄（v8.1.2 之前的修改不會出現在這裡）</div>';
@@ -6720,16 +6740,20 @@ function modStillShows(title){
 // 名單在 admins/{uid}：email、name、role（admin／staff／coach）、active
 // 既有 Firebase 帳號用「邀請」：invites/{email}，對方下次登入時自動加入名單
 // ══════════════════════════════════════════════════════
-const ROLE_LABEL={admin:'管理者',staff:'行政',coach:'教練'};
+// ══════════════════════════════════════════════════════
+// v8.2 角色權限：管理者／行政／教練／客服，一人可有多個身份，權限合併計算
+// ══════════════════════════════════════════════════════
+const ROLE_LABEL={admin:'管理者',staff:'行政',coach:'教練',service:'客服'};
 
 let myAccount=null;
 
 // 登入後：顯示姓名與角色，管理者才看得到「帳號」按鈕
 function applyAccountUI(){
   const el=document.getElementById('user-email');
-  if(el&&myAccount) el.textContent=`${myAccount.name||myAccount.email}（${ROLE_LABEL[myAccount.role]||myAccount.role}）`;
+  if(el&&myAccount) el.textContent=`${myAccount.name||myAccount.email}（${rolesText(myAccount)}）`;
   const btn=document.getElementById('acct-btn');
-  if(btn) btn.style.display=myAccount&&myAccount.role==='admin'?'':'none';
+  if(btn) btn.style.display=can('admin')?'':'none';
+  applyRolePermissions();
 }
 
 // 建立帳號用的第二個連線：在這裡建立新帳號，目前登入的管理者不會被登出
@@ -6774,27 +6798,28 @@ async function loadAccounts(){
 }
 
 function renderAccounts(){
-  const roleSel=(a,self)=>`<select ${self?'disabled title="不能修改自己的角色"':''} onchange="setAccountRole('${a.uid}',this.value)" style="width:auto;font-size:12px">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${(a.role||'admin')===k?'selected':''}>${v}</option>`).join('')}</select>`;
   const rows=_accounts.map(a=>{
     const self=a.uid===myAccount.uid, off=a.active===false;
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px solid #eee;flex-wrap:wrap;${off?'opacity:.55':''}">
       <div style="flex:1;min-width:160px"><div style="font-size:13px;font-weight:500">${a.name||'（未填姓名）'}${self?' <span style="font-size:10px;color:#27500A">（你）</span>':''}${off?' <span class="pill pill-gray" style="font-size:10px">已停用</span>':''}</div><div style="font-size:11px;color:#999">${a.email||a.uid}</div></div>
-      ${roleSel(a,self)}
+      <span style="font-size:12px">${rolesText(a)}${a.coachName&&rolesOf(a).includes('coach')?`<span style="color:#999">（${a.coachName}）</span>`:''}</span>
+      ${self?'':`<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditAccount('${a.uid}')">改身份</button>`}
       <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="resendSetPassword('${a.email||''}')" ${a.email?'':'disabled'}>寄設定密碼信</button>
       ${self?'':`<button class="btn ${off?'btn-green':'btn-red'}" style="font-size:11px;padding:3px 8px" onclick="toggleAccount('${a.uid}')">${off?'重新啟用':'停用'}</button>`}
     </div>`;
   }).join('');
   const inv=_invites.map(i=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid #eee;flex-wrap:wrap">
       <div style="flex:1;min-width:160px"><div style="font-size:13px">${i.name||''} <span class="pill pill-amber" style="font-size:10px">等待對方登入</span></div><div style="font-size:11px;color:#999">${i.email}</div></div>
-      <span style="font-size:12px">${ROLE_LABEL[i.role]||i.role}</span>
+      <span style="font-size:12px">${rolesText(i)}</span>
       <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="resendSetPassword('${i.email}')">寄設定密碼信</button>
       <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="cancelInvite('${i.email}')">取消邀請</button>
     </div>`).join('');
   document.getElementById('mod-body').innerHTML=`
     <div style="font-size:13px;font-weight:500;margin-bottom:6px">新增人員</div>
     <div class="fg"><div class="fr"><label>Email *</label><input type="email" id="acct-email" placeholder="name@holiway.com.tw"></div><div class="fr"><label>姓名 *</label><input type="text" id="acct-name" maxlength="40"></div></div>
-    <div class="fr"><label>角色</label><select id="acct-role"><option value="staff">行政</option><option value="coach">教練</option><option value="admin">管理者</option></select></div>
-    <div style="font-size:11px;color:#999;margin:-2px 0 8px">建立後系統會寄一封信到這個 Email，讓對方自己設定密碼。行政與教練目前仍可使用全部功能，分權限會在下一階段加上。</div>
+    <div class="fr" style="margin-bottom:0"><label>身份（可複選）</label></div>
+    ${roleChecksHTML('acct',['staff'],'')}
+    <div style="font-size:11px;color:#999;margin:0 0 8px;line-height:1.6">管理者：全部功能｜行政：報名、收費、申請退費｜教練：看全部班級與家長電話、點名、扣券，看不到金額｜客服：只能查看課表、名單與家長電話</div>
     <button class="btn btn-pink" style="width:100%" onclick="createAccount()">新增並寄出設定密碼信</button>
     <div style="font-size:13px;font-weight:500;margin:16px 0 4px">目前帳號（${_accounts.filter(a=>a.active!==false).length} 位使用中）</div>
     ${rows||'<div class="empty">沒有帳號</div>'}
@@ -6804,9 +6829,11 @@ function renderAccounts(){
 async function createAccount(){
   const email=(document.getElementById('acct-email').value||'').trim().toLowerCase();
   const name=(document.getElementById('acct-name').value||'').trim();
-  const role=document.getElementById('acct-role').value;
+  const roles=readRoleChecks('acct');
+  const coachName=document.getElementById('acct-coach')?.value||'';
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){alert('請輸入正確的 Email');return;}
   if(!name){alert('請輸入姓名');return;}
+  if(!roles.length){alert('請至少勾選一種身份');return;}
   if(_accounts.some(a=>(a.email||'').toLowerCase()===email)){alert('這個 Email 已經在名單中');return;}
   const me=auth.currentUser?.email||'';
   showLoading('建立帳號中…');
@@ -6819,44 +6846,38 @@ async function createAccount(){
       await sec.signOut();
     }catch(e){
       if(e&&e.code==='auth/email-already-in-use'){
-        // 這個 Email 已經有 Firebase 帳號：改用邀請，對方下次登入時自動加入
-        await db.collection('invites').doc(email).set({email,name,role,createdBy:me,createdAt:new Date().toISOString()});
-        await auditNote('admins',email,`${name}（${email}）`,'create',[{f:'role',label:'邀請角色',from:'',to:ROLE_LABEL[role]}]);
+        const inv={email,name,role:roles[0],roles,createdBy:me,createdAt:new Date().toISOString()};
+        if(roles.includes('coach')&&coachName) inv.coachName=coachName;
+        await db.collection('invites').doc(email).set(inv);
+        await auditNote('admins',email,`${name}（${email}）`,'create',[{f:'roles',label:'邀請身份',from:'',to:rolesText(inv)}]);
         hideLoading();
         alert(`「${email}」原本就有帳號，已改為邀請。\n請對方用原本的密碼登入一次，就會自動加入名單。\n忘記密碼的話，可以在清單上按「寄設定密碼信」。`);
         await loadAccounts(); return;
       }
       throw e;
     }
-    await db.collection('admins').doc(uid).set({email,name,role,active:true,createdBy:me,createdAt:new Date().toISOString()});
-    await auditNote('admins',uid,`${name}（${email}）`,'create',[{f:'role',label:'角色',from:'',to:ROLE_LABEL[role]}]);
+    const doc={email,name,role:roles[0],roles,active:true,createdBy:me,createdAt:new Date().toISOString()};
+    if(roles.includes('coach')&&coachName) doc.coachName=coachName;
+    await db.collection('admins').doc(uid).set(doc);
+    await auditNote('admins',uid,`${name}（${email}）`,'create',[{f:'roles',label:'身份',from:'',to:rolesText(doc)}]);
     try{ await sendSetPasswordMail(email); }catch(e){ console.warn(e); }
     hideLoading();
     alert(`已建立「${name}」的帳號，設定密碼的信已寄到 ${email}。\n請對方收信設定密碼後，用這個 Email 登入。`);
     await loadAccounts();
   }catch(e){
     hideLoading();
-    const msg={'auth/operation-not-allowed':'Firebase 尚未開放 Email／密碼登入或已關閉註冊，請到 Authentication → 登入方式確認。','auth/invalid-email':'Email 格式不正確。','permission-denied':'權限不足，請確認 Firebase 規則已更新到 v8.1.3。'}[e&&e.code];
+    const msg={'auth/operation-not-allowed':'Firebase 尚未開放 Email／密碼登入或已關閉註冊，請到 Authentication → 登入方式確認。','auth/invalid-email':'Email 格式不正確。','permission-denied':'權限不足，請確認 Firebase 規則已更新到 v8.2。'}[e&&e.code];
     alert('建立帳號失敗：'+(msg||(e&&e.message)||e));
   }
 }
 
-async function setAccountRole(uid, role){
-  const a=_accounts.find(x=>x.uid===uid); if(!a||uid===myAccount.uid) return;
-  if(!confirm(`把「${a.name||a.email}」的角色從「${ROLE_LABEL[a.role||'admin']}」改成「${ROLE_LABEL[role]}」？`)){ renderAccounts(); return; }
-  try{
-    await db.collection('admins').doc(uid).set({email:a.email||'',name:a.name||'',role,active:a.active!==false,createdBy:a.createdBy||'',createdAt:a.createdAt||'',updatedBy:auth.currentUser?.email||'',updatedAt:new Date().toISOString()});
-    await auditNote('admins',uid,`${a.name||''}（${a.email||''}）`,'update',[{f:'role',label:'角色',from:ROLE_LABEL[a.role||'admin'],to:ROLE_LABEL[role]}]);
-    hint('角色已更新 ✓'); await loadAccounts();
-  }catch(e){ alert('更新失敗：'+(e&&e.message||e)); renderAccounts(); }
-}
 
 async function toggleAccount(uid){
   const a=_accounts.find(x=>x.uid===uid); if(!a||uid===myAccount.uid) return;
   const off=a.active===false;
   if(!confirm(off?`重新啟用「${a.name||a.email}」？`:`停用「${a.name||a.email}」？\n停用後這個帳號就無法登入系統，過去的操作紀錄都會保留。`)) return;
   try{
-    await db.collection('admins').doc(uid).set({email:a.email||'',name:a.name||'',role:a.role||'admin',active:off,createdBy:a.createdBy||'',createdAt:a.createdAt||'',updatedBy:auth.currentUser?.email||'',updatedAt:new Date().toISOString()});
+    await db.collection('admins').doc(uid).set(accountDoc(a,rolesOf(a),{active:off}));
     await auditNote('admins',uid,`${a.name||''}（${a.email||''}）`,'update',[{f:'active',label:'狀態',from:off?'已停用':'使用中',to:off?'使用中':'已停用'}]);
     hint(off?'已重新啟用 ✓':'已停用 ✓'); await loadAccounts();
   }catch(e){ alert('更新失敗：'+(e&&e.message||e)); }
@@ -6935,6 +6956,255 @@ async function changeMyPassword(){
       :c==='auth/too-many-requests'?'嘗試次數過多，請稍後再試'
       :'修改失敗：'+((e&&e.message)||e);
   }
+}
+
+const ROLE_ORDER=['admin','staff','coach','service'];
+
+// 每項權限開放給哪些身份
+const PERMS={
+  admin:  ['admin'],                          // 刪除、作廢、核准退費、帳號、備份、場地、教練、學費設定
+  money:  ['admin','staff'],                  // 看得到金額、開帳、收款、申請退費
+  edit:   ['admin','staff'],                  // 報名、審核、學生、期別、班次、補課、多元券
+  attend: ['admin','staff','coach'],          // 點名、掃碼簽到、多元課扣券
+  reports:['admin','staff'],                  // 全部報表
+  audit:  ['admin','staff','coach','service'], // 操作紀錄：全部開放（金額相關紀錄只有管理者與行政看得到）
+  view:   ['admin','staff','coach','service'] // 課表、名單、學生資料、家長電話
+};
+
+function myRoles(){
+  if(!myAccount) return [];
+  const r=Array.isArray(myAccount.roles)&&myAccount.roles.length?myAccount.roles:[myAccount.role||'admin'];
+  return r.filter(x=>ROLE_LABEL[x]);
+}
+
+function can(p){ const r=myRoles(); return (PERMS[p]||[]).some(x=>r.includes(x)); }
+
+function rolesText(acc){
+  const r=Array.isArray(acc.roles)&&acc.roles.length?acc.roles:[acc.role||'admin'];
+  return ROLE_ORDER.filter(x=>r.includes(x)).map(x=>ROLE_LABEL[x]).join('、');
+}
+
+// 按鈕呼叫的功能 → 需要的權限（沒列出的功能是查看用，所有身份都能用）
+const FN_PERM={
+  admin:['cleanupOrphans','delStu','deleteTerm','deleteSession','deleteVenue','createVenue','saveVenue','openAddVenue','openEditVenue','moveVenue',
+    'openAddCoach','openEditCoach','saveCoach','createCoach','deleteCoach','deleteFee','openAccountMod','createAccount','openEditAccount','saveAccountRoles',
+    'toggleAccount','resendSetPassword','cancelInvite','openBackupMod','exportAllData','startRestore','doRestore','approveRefund','rejectRefund','deleteCustomType'],
+  money:['openIssueFee','openIssueFeeForStudent','openIssueFeeForTerm','openIssueFeePreset','issueFee','submitMultiCourseFee','openPayMod','recordPay',
+    'openRefundMod','recordRefund','openFeeHist','openIssueVoucherForStudent','openAddVoucher','openAddVoucherForStudent','createVoucherPack','openVoucherHistory',
+    'feeQuickFilter','clearFeeQuick','mcfRecalc','ifPrev','ifSessChange','ifTermChange','renderFeeForm','applyMonthFilter','setThisMonth','calcReportFee'],
+  edit:['addEnroll','addHoliday','addStu','approveReg','rejectReg','editPending','savePendingEdit','cancelBooking','cancelMakeup','cloneTerm','createBooking',
+    'createBookingForStudent','createMultiSlot','createSession','createTerm','addCustomType','editCustomType','saveEditType','deleteEnroll','deleteMakeup',
+    'deleteMultiSlot','markMakeupDone','openAddBookingToSlot','openAddEnroll','openAddMakeup','openAddMultiSlot','openAddSession','openAddStudent','openAddTerm',
+    'openCourseDates','saveCourseDates','openEditEnroll','saveEnrollChange','openEditMultiSlot','saveMultiSlot','openEditSession','saveSession','openEditStudent',
+    'saveStudent','openEditTerm','saveTerm','openEnrollForStudent','submitEnrollForStudent','openHolidays','removeHoliday','openMakeupSlot','saveMakeupSlot',
+    'removeMakeupSlot','schedMakeupFromUI','submitAddMakeup','openManageTypes','openManualBooking','openRenewTerm','submitRenew','promoteWaitlist','removeEnroll',
+    'rosterAdd','rosterAddSubmit','rosterEditStudent','rosterSaveStudent','rosterMove','rosterSetStatus','tidyIdleSessions','toggleSessionStatus','saveSubCoach',
+    'clearSubCoach','onSubCoachSelChange','onSubCoachInputChange','dlRegQR','previewParentForm'],
+  attend:['setSI','siSetQuick','manualCheck','toggleAtt','confirmScan','simScan','setSlotAtt','saveManualSignin','assignSigninRequest','dismissSigninRequest'],
+  audit:[]
+};
+
+const _fnPerm={};
+
+Object.entries(FN_PERM).forEach(([p,l])=>l.forEach(n=>{_fnPerm[n]=p;}));
+
+// 守門：沒有權限時，就算從別的地方呼叫也不會執行
+function installPermGuards(){
+  Object.keys(_fnPerm).forEach(name=>{
+    const orig=window[name];
+    if(typeof orig!=='function'||orig.__guarded) return;
+    const perm=_fnPerm[name];
+    const g=function(...a){ if(!can(perm)){ alert('你的帳號沒有這項功能的權限'); return; } return orig.apply(this,a); };
+    g.__guarded=true; window[name]=g;
+  });
+}
+
+function attrAllowed(code){
+  if(!code) return true;
+  if(/showReport\('(?!att')/.test(code)&&!can('reports')) return false;
+  const re=/(?<![\w.$])([A-Za-z_$][\w$]*)\s*\(/g; let m;
+  while((m=re.exec(code))){ const p=_fnPerm[m[1]]; if(p&&!can(p)) return false; }
+  return true;
+}
+
+const MONEY_RE=/NT\$|未開帳|尚未開帳|欠\s?款|欠\s?NT|欠\d|已繳|結清|未收學費|溢繳|退費|券用完|剩\d+張|欠券|未購券/;
+
+function applyPermToNode(root){
+  if(!myAccount||!root||root.nodeType!==1) return;
+  const els=[...(root.matches('[onclick],[onchange],[oninput]')?[root]:[]),...root.querySelectorAll('[onclick],[onchange],[oninput]')];
+  els.forEach(el=>{
+    const code=[el.getAttribute('onclick'),el.getAttribute('onchange'),el.getAttribute('oninput')].filter(Boolean).join(';');
+    if(attrAllowed(code)) return;
+    if(el.tagName==='SELECT'||el.tagName==='INPUT'||el.tagName==='TEXTAREA'){ el.disabled=true; el.title='沒有修改權限'; }
+    else el.style.display='none';
+  });
+  if(!can('money')){
+    const cand=[...(root.matches('span,td,.mc-lbl,.mc-val,.fee-tag')?[root]:[]),...root.querySelectorAll('span,td,.mc-lbl,.mc-val,.fee-tag')];
+    cand.forEach(el=>{
+      if(el.childElementCount>0||!MONEY_RE.test(el.textContent||'')) return;
+      const mc=el.closest('.mc'); (mc||el).style.display='none';
+    });
+  }
+}
+
+let _permObserver=null;
+
+function startPermObserver(){
+  if(_permObserver||typeof MutationObserver==='undefined') return;
+  _permObserver=new MutationObserver(muts=>{ muts.forEach(m=>m.addedNodes.forEach(n=>{ if(n.nodeType===1) applyPermToNode(n); })); });
+  _permObserver.observe(document.body,{childList:true,subtree:true});
+}
+
+// 上方分頁：依身份隱藏
+function hiddenTabs(){
+  const h=[];
+  if(!can('money')) h.push('fee');
+  if(!can('edit')) h.push('reg-qr');
+  if(!can('reports')&&!can('attend')) h.push('reports');
+  return h;
+}
+
+function applyRoleNav(){
+  const hide=hiddenTabs();
+  document.querySelectorAll('.nb').forEach(b=>{
+    const m=(b.getAttribute('onclick')||'').match(/^sw\('([\w-]+)'/);
+    if(m) b.style.display=hide.includes(m[1])?'none':'';
+  });
+  const ff=document.getElementById('stu-fee-filter'); if(ff&&!can('money')){ ff.value='all'; ff.style.display='none'; }
+}
+
+// 套用到整個畫面（登入後呼叫）
+function applyRolePermissions(){
+  installPermGuards();
+  applyRoleNav();
+  applyPermToNode(document.body);
+  startPermObserver();
+  if(!window.__swGuarded){
+    const origSw=window.sw;
+    window.sw=function(tab,btn){ if(hiddenTabs().includes(tab)) tab='dash'; return origSw.call(this,tab,btn); };
+    window.__swGuarded=true;
+  }
+}
+
+// 教練查詢報表：只看自己的授課人堂數
+function lockCoachReport(){
+  if(can('reports')) return true;
+  const sel=document.getElementById('att-coach');
+  const cn=myAccount&&myAccount.coachName;
+  if(sel){ if(cn) sel.value=cn; sel.disabled=true; }
+  if(!cn){ const r=document.getElementById('att-result'); if(r) r.innerHTML='<div class="empty">你的帳號還沒有對應教練，請管理者在「帳號管理」設定。</div>'; return false; }
+  return true;
+}
+
+// ══════════════════════════════════════════════════════
+// 退費：行政送出申請，管理者核准後才真正退費
+// ══════════════════════════════════════════════════════
+let refundReqs=[];
+
+async function loadRefundReqs(){
+  try{ const s=await db.collection('refundReqs').get(); refundReqs=s.docs.map(d=>({id:d.id,...d.data()})); }catch(e){ refundReqs=[]; }
+}
+
+function readRefundForm(){
+  return {
+    amt:parseFloat(document.getElementById('ref-amt').value)||0,
+    reason:document.getElementById('ref-reason').value.trim(),
+    mode:document.querySelector('input[name="ref-mode"]:checked')?.value||'void',
+    date:document.getElementById('ref-date').value||today()
+  };
+}
+
+async function executeRefund(f, r, req){
+  txns.push({id:'t'+Date.now()+Math.random().toString(36).slice(2,5),feeId:f.id,studentId:f.studentId,type:'refund',amount:r.amt,date:r.date,
+    note:r.reason+(r.mode==='partial'?'（部分退費）':'')+(req?`（${req.requestedBy} 申請）`:''),method:'退費',...(req?{requestId:req.id}:{})});
+  if(r.mode==='void') f.status='refunded';
+  await saveCol('fees',fees); await saveCol('txns',txns);
+}
+
+async function approveRefund(reqId){
+  const q=refundReqs.find(x=>x.id===reqId); if(!q||q.status!=='pending') return;
+  const f=fees.find(x=>x.id===q.feeId);
+  if(!f){alert('找不到這張帳單，無法核准');return;}
+  const s=feeStatus(f);
+  if(q.amount>s.paid){alert(`這張帳單目前已收款只有 ${fmt(s.paid)}，少於申請的退費 ${fmt(q.amount)}，請駁回後重新申請。`);return;}
+  if(!confirm(`核准退費？\n${q.feeLabel}\n退費 ${fmt(q.amount)}（${q.mode==='void'?'退費並作廢帳單':'部分退費，帳單保留'}）\n原因：${q.reason}\n申請人：${q.requestedBy}`)) return;
+  await executeRefund(f,{amt:q.amount,reason:q.reason,mode:q.mode,date:today()},q);
+  const upd={...q,status:'approved',decidedBy:auth.currentUser?.email||'',decidedAt:new Date().toISOString()};
+  await db.collection('refundReqs').doc(q.id).set(upd); Object.assign(q,upd);
+  await auditNote('refundReqs',q.id,q.feeLabel,'update',[{f:'status',label:'退費申請',from:'待核准',to:'已核准'}]);
+  renderFee();renderStudents();renderDash();
+  hint('已核准並完成退費 ✓');
+}
+
+async function rejectRefund(reqId){
+  const q=refundReqs.find(x=>x.id===reqId); if(!q||q.status!=='pending') return;
+  const why=prompt(`駁回退費申請（${q.feeLabel}，${fmt(q.amount)}）\n請輸入駁回原因：`,'');
+  if(why===null) return;
+  const upd={...q,status:'rejected',decidedBy:auth.currentUser?.email||'',decidedAt:new Date().toISOString(),decisionNote:why.trim()};
+  await db.collection('refundReqs').doc(q.id).set(upd); Object.assign(q,upd);
+  await auditNote('refundReqs',q.id,q.feeLabel,'update',[{f:'status',label:'退費申請',from:'待核准',to:'已駁回'+(why.trim()?'：'+why.trim():'')}]);
+  renderFee();
+  hint('已駁回退費申請');
+}
+
+// 學費頁上方：管理者看到待核准清單；行政看到自己申請的狀態
+function renderRefundReqArea(){
+  const body=document.getElementById('fee-body'); if(!body||!can('money')) return;
+  let area=document.getElementById('refund-req-area');
+  if(!area){ area=document.createElement('div'); area.id='refund-req-area'; body.parentNode.insertBefore(area,body); }
+  const me=auth.currentUser?.email||'';
+  const pend=refundReqs.filter(q=>q.status==='pending');
+  const mine=refundReqs.filter(q=>q.requestedBy===me&&q.status!=='pending'&&(Date.now()-Date.parse(q.decidedAt||q.requestedAt))<14*864e5);
+  const row=q=>`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:0.5px solid #F3DDB0">
+      <div style="flex:1;min-width:180px"><div style="font-size:12px;font-weight:500">${q.feeLabel}</div>
+        <div style="font-size:11px;color:#666">退費 ${fmt(q.amount)}・${q.mode==='void'?'退費並作廢帳單':'部分退費'}・原因：${q.reason}</div>
+        <div style="font-size:11px;color:#999">${q.requestedBy}・${new Date(q.requestedAt).toLocaleString('zh-TW',{hour12:false})}</div></div>
+      ${q.status==='pending'?(can('admin')?`<button class="btn btn-green" style="font-size:11px;padding:3px 10px" onclick="approveRefund('${q.id}')">核准退費</button><button class="btn btn-outline" style="font-size:11px;padding:3px 10px" onclick="rejectRefund('${q.id}')">駁回</button>`:'<span class="pill pill-amber" style="font-size:10px">待管理者核准</span>')
+        :q.status==='approved'?'<span class="pill pill-green" style="font-size:10px">已核准</span>':`<span class="pill pill-red" style="font-size:10px">已駁回${q.decisionNote?'：'+q.decisionNote:''}</span>`}
+    </div>`;
+  const list=can('admin')?pend:[...pend.filter(q=>q.requestedBy===me),...mine];
+  area.innerHTML=list.length?`<div style="background:#FFF8E6;border:0.5px solid #FAC775;border-radius:10px;padding:10px 12px;margin-bottom:10px">
+    <div style="font-size:12px;font-weight:500;color:#412402;margin-bottom:4px">${can('admin')?`🧾 待核准的退費申請（${pend.length}）`:'🧾 我的退費申請'}</div>${list.map(row).join('')}</div>`:'';
+}
+
+// ── 帳號：身份可複選、教練可對應到教練名單 ──
+function rolesOf(a){ return Array.isArray(a.roles)&&a.roles.length?a.roles:[a.role||'admin']; }
+
+function accountDoc(a, roles, extra){
+  const d={email:a.email||'',name:a.name||'',role:roles[0],roles,active:a.active!==false,createdBy:a.createdBy||'',createdAt:a.createdAt||''};
+  if(roles.includes('coach')&&(extra&&extra.coachName!==undefined?extra.coachName:a.coachName)) d.coachName=(extra&&extra.coachName!==undefined?extra.coachName:a.coachName)||'';
+  return Object.assign(d,extra&&extra.active!==undefined?{active:extra.active}:{}, {updatedBy:auth.currentUser?.email||'',updatedAt:new Date().toISOString()});
+}
+
+function roleChecksHTML(prefix, roles, coachName){
+  const coachOpts=coaches.filter(c=>c.active!==false).map(c=>`<option value="${c.name}" ${c.name===coachName?'selected':''}>${c.name}</option>`).join('');
+  return `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 6px">${ROLE_ORDER.map(r=>`<label style="display:flex;align-items:center;gap:4px;margin:0;font-size:13px;cursor:pointer"><input type="checkbox" class="${prefix}-role" value="${r}" ${roles.includes(r)?'checked':''} onchange="document.getElementById('${prefix}-coachrow').style.display=document.querySelector('.${prefix}-role[value=coach]').checked?'':'none'" style="width:auto">${ROLE_LABEL[r]}</label>`).join('')}</div>
+    <div id="${prefix}-coachrow" class="fr" style="${roles.includes('coach')?'':'display:none'}"><label>對應教練（報表只看這位教練的授課）</label><select id="${prefix}-coach"><option value="">— 未指定 —</option>${coachOpts}</select></div>`;
+}
+
+function readRoleChecks(prefix){ return ROLE_ORDER.filter(r=>document.querySelector(`.${prefix}-role[value=${r}]`)?.checked); }
+
+function openEditAccount(uid){
+  const a=_accounts.find(x=>x.uid===uid); if(!a||uid===myAccount.uid) return;
+  document.getElementById('mod-title').textContent='改身份 — '+(a.name||a.email);
+  document.getElementById('mod-body').innerHTML=`<div class="info-box">${a.email}</div>
+    <div class="fr" style="margin-bottom:0"><label>身份（可複選）</label></div>
+    ${roleChecksHTML('ea',rolesOf(a),a.coachName||'')}
+    <div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-outline" onclick="openAccountMod()">← 返回</button><button class="btn btn-pink" style="flex:1" onclick="saveAccountRoles('${uid}')">儲存</button></div>`;
+}
+
+async function saveAccountRoles(uid){
+  const a=_accounts.find(x=>x.uid===uid); if(!a||uid===myAccount.uid) return;
+  const roles=readRoleChecks('ea');
+  if(!roles.length){alert('請至少勾選一種身份');return;}
+  const coachName=document.getElementById('ea-coach')?.value||'';
+  const before=rolesText(a);
+  try{
+    const doc=accountDoc(a,roles,{coachName});
+    await db.collection('admins').doc(uid).set(doc);
+    await auditNote('admins',uid,`${a.name||''}（${a.email||''}）`,'update',[{f:'roles',label:'身份',from:before,to:rolesText(doc)}]);
+    hint('身份已更新 ✓'); await openAccountMod();
+  }catch(e){ alert('更新失敗：'+(e&&e.message||e)); }
 }
 </script>
 </body>
