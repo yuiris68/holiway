@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v8.2.2 BUILD 20261113-CONCURRENCY -->
+<!-- HOLIWAY v8.2.3 BUILD 20261113-ARCHIVE -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v8.2.2</title>
+<title>哈樂維 v8.2.3</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -231,7 +231,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.2.2</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.2.3</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -253,6 +253,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     <button class="logout-btn" id="acct-btn" style="display:none" onclick="openAccountMod()" title="新增人員、設定角色、停用帳號">👥 帳號</button>
     <button class="logout-btn" onclick="openChangePassword()" title="修改我的密碼">🔑 密碼</button>
     <button class="logout-btn" onclick="openAuditLog()" title="誰在什麼時候改了什麼">📋 紀錄</button>
+    <button class="logout-btn" onclick="openArchiveMod()" title="查看與還原已封存的資料">🗄 封存</button>
     <button class="logout-btn" onclick="openBackupMod()" title="備份與還原">💾 備份</button>
     <button class="logout-btn" onclick="doLogout()">登出</button>
     </div>
@@ -566,6 +567,11 @@ function hint(m){const e=document.getElementById('sv');e.textContent=m;setTimeou
 // ── 差異寫入：只寫有變動的文件、只刪自己刪掉的文件 ──
 // 不再整批刪除重寫，避免覆蓋他人（家長報名、其他裝置）剛寫入的資料，也大幅減少寫入次數
 const _synced = {}; // col -> Map(id -> 序列化內容)，代表「上次與雲端一致的狀態」
+// v8.2.3 封存：這些資料不實體刪除，從清單移除時自動改成「封存」（archived:true），平常不顯示
+const ARCHIVE_COLS = new Set(['students','terms','sessions','enrolls','makeup','voucherBookings','coaches','venues','multiSchedule']);
+const _archived = {};   // col -> 已封存的資料
+const _purge = {};      // col -> Set(id)，管理者確認要永久刪除的測試資料
+let _archCtx = null;    // 這次封存的原因與批次（一起封存的資料可一起還原）
 function _snapOf(col){ return _synced[col] || (_synced[col] = new Map()); }
 function _ser(v){
   if (v === undefined) return undefined;
@@ -578,11 +584,13 @@ async function fsGet(col){
   const arr = snap.docs.map(d=>({id:d.id,...d.data()}));
   const m = _snapOf(col); m.clear();
   arr.forEach(x => m.set(String(x.id), _ser(x)));
+  if (ARCHIVE_COLS.has(col)) { _archived[col] = arr.filter(x => x.archived); return arr.filter(x => !x.archived); }
   return arr;
 }
 // ── 差異寫入（加上操作紀錄）：資料與紀錄放在同一批寫入，要嘛一起成功、要嘛都不寫 ──
 // ── 交易式寫入：每筆要修改或刪除的資料，先確認雲端版本跟我載入時一樣才寫入 ──
 async function fsSave(col, items) {
+  if (ARCHIVE_COLS.has(col)) items = archiveMerge(col, items);
   const m = _snapOf(col);
   const byId = new Map();
   (items||[]).forEach(it => { if (it && it.id != null) byId.set(String(it.id), it); });
@@ -611,7 +619,8 @@ async function fsSave(col, items) {
         if (op.type === 'set') tx.set(ref, op.it); else tx.delete(ref);
         if (logIt) {
           let before=null; try{ before=op.prev?JSON.parse(op.prev):null; }catch(e){}
-          const action = op.type==='del' ? 'delete' : before ? 'update' : 'create';
+          let action = op.type==='del' ? 'delete' : before ? 'update' : 'create';
+          if (action==='update') { const af=JSON.parse(op.s); if (!before.archived && af.archived) action='archive'; else if (before.archived && !af.archived) action='unarchive'; }
           const entry = auditEntry(col, op.id, action, before, op.type==='set'?JSON.parse(op.s):null);
           if (action!=='update' || entry.changes.length) tx.set(db.collection(auditColFor(col)).doc(entry.id), entry);
         }
@@ -718,9 +727,10 @@ function termStatus(t){const td=today();if(td>=t.startDate&&td<=t.endDate)return
 function pillCls(k){return{active:'pill-green',enrolling:'pill-purple',upcoming:'pill-blue',ended:'pill-gray'}[k]||'pill-gray';}
 function getEnrolled(tId,sId){return enrolls.filter(e=>e.termId===tId&&(!sId||e.sessionId===sId)&&e.status==='enrolled');}
 function getWait(tId,sId){return enrolls.filter(e=>e.termId===tId&&(!sId||e.sessionId===sId)&&e.status==='waitlist');}
-function getSt(id){return students.find(s=>s.id===id)||{name:'?'};}
-function getSess(id){return sessions.find(s=>s.id===id);}
-function getVenue(id){return venues.find(v=>v.id===id);}
+function getSt(id){return students.find(s=>s.id===id)||archivedOf('students').find(s=>s.id===id)||{name:'?'};}
+function getSess(id){return sessions.find(s=>s.id===id)||archivedOf('sessions').find(s=>s.id===id);}
+function getVenue(id){return venues.find(v=>v.id===id)||archivedOf('venues').find(v=>v.id===id);}
+function getTerm(id){return terms.find(t=>t.id===id)||archivedOf('terms').find(t=>t.id===id);}
 function termProgress(t){const s=new Date(t.startDate),e=new Date(t.endDate),n=new Date(today());if(n<s)return 0;if(n>e)return 100;return Math.round((n-s)/(e-s)*100);}
 function getSessPrice(sid){if(myAccount&&!can('money'))return null;const p=pricing.find(x=>x.sessId===sid);return p?p.price:null;}
 function feeStatus(f){
@@ -901,14 +911,23 @@ async function moveVenue(id, dir) {
 }
 
 
-function renderVenues(){document.getElementById('venues-body').innerHTML=venues.map(v=>{const vS=sessions.filter(s=>s.venueId===v.id);return`<div class="card" style="border-left:3px solid ${v.color}"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:30px;height:30px;border-radius:8px;background:${v.color}20;display:flex;align-items:center;justify-content:center;font-size:15px">${v.icon||'📍'}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${v.name}</div><div style="font-size:11px;color:#999">滿班${v.capacity}人 · ${vS.length}班次 · ${v.description||''}</div></div><span class="pill ${v.status==='active'?'pill-green':'pill-gray'}">${v.status==='active'?'使用中':'停用'}</span></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="moveVenue('${v.id}',-1)" title="up">&#8593;</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="moveVenue('${v.id}',1)" title="down">&#8595;</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditVenue('${v.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteVenue('${v.id}')">刪除</button></div></div>`;}).join('')||'<div class="empty">尚無場地</div>';}
+function renderVenues(){document.getElementById('venues-body').innerHTML=venues.map(v=>{const vS=sessions.filter(s=>s.venueId===v.id);return`<div class="card" style="border-left:3px solid ${v.color}"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:30px;height:30px;border-radius:8px;background:${v.color}20;display:flex;align-items:center;justify-content:center;font-size:15px">${v.icon||'📍'}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${v.name}</div><div style="font-size:11px;color:#999">滿班${v.capacity}人 · ${vS.length}班次 · ${v.description||''}</div></div><span class="pill ${v.status==='active'?'pill-green':'pill-gray'}">${v.status==='active'?'使用中':'停用'}</span></div><div style="display:flex;gap:5px"><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="moveVenue('${v.id}',-1)" title="up">&#8593;</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="moveVenue('${v.id}',1)" title="down">&#8595;</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditVenue('${v.id}')">編輯</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteVenue('${v.id}')">封存</button></div></div>`;}).join('')||'<div class="empty">尚無場地</div>';}
 function openAddVenue(){renderVenueForm(null,{name:'',shortName:'',type:'classroom',color:VENUE_COLORS[venues.length%VENUE_COLORS.length],icon:'📍',capacity:15,description:'',status:'active'});}
 function openEditVenue(id){const v=getVenue(id);if(v)renderVenueForm(id,v);}
-function renderVenueForm(editId,d){document.getElementById('mod-title').textContent=editId?'編輯場地':'新增場地';const sw=VENUE_COLORS.map(c=>`<span style="width:20px;height:20px;border-radius:50%;border:2px solid ${d.color===c?'#333':'transparent'};cursor:pointer;display:inline-block;vertical-align:middle;background:${c};margin-right:4px" onclick="document.getElementById('vf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');document.getElementById('mod-body').innerHTML=`<div class="fg"><div class="fr"><label>場地名稱 *</label><input type="text" id="vf-name" value="${d.name||''}"></div><div class="fr"><label>簡稱</label><input type="text" id="vf-short" value="${d.shortName||''}"></div></div><div class="fg"><div class="fr"><label>場地類型</label><select id="vf-type"><option value="track" ${d.type==='track'?'selected':''}>賽道</option><option value="classroom" ${d.type==='classroom'?'selected':''}>教室</option><option value="art" ${d.type==='art'?'selected':''}>藝術空間</option><option value="other" ${d.type==='other'?'selected':''}>其他</option></select></div><div class="fr"><label>滿班人數</label><input type="number" id="vf-cap" value="${d.capacity||15}" min="1"></div></div><div class="fr"><label>顏色</label><input type="hidden" id="vf-color" value="${d.color}"><div style="margin-top:4px">${sw}</div></div><div class="fr"><label>圖示</label><input type="text" id="vf-icon" value="${d.icon||'📍'}" style="width:60px;font-size:18px;text-align:center"></div><div class="fr"><label>說明</label><input type="text" id="vf-desc" value="${d.description||''}"></div><div class="fr"><label>狀態</label><select id="vf-status"><option value="active" ${d.status==='active'?'selected':''}>使用中</option><option value="inactive" ${d.status==='inactive'?'selected':''}>停用</option></select></div><div style="display:flex;gap:6px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveVenue('${editId}')`:'createVenue()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteVenue('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
+function renderVenueForm(editId,d){document.getElementById('mod-title').textContent=editId?'編輯場地':'新增場地';const sw=VENUE_COLORS.map(c=>`<span style="width:20px;height:20px;border-radius:50%;border:2px solid ${d.color===c?'#333':'transparent'};cursor:pointer;display:inline-block;vertical-align:middle;background:${c};margin-right:4px" onclick="document.getElementById('vf-color').value='${c}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='#333'"></span>`).join('');document.getElementById('mod-body').innerHTML=`<div class="fg"><div class="fr"><label>場地名稱 *</label><input type="text" id="vf-name" value="${d.name||''}"></div><div class="fr"><label>簡稱</label><input type="text" id="vf-short" value="${d.shortName||''}"></div></div><div class="fg"><div class="fr"><label>場地類型</label><select id="vf-type"><option value="track" ${d.type==='track'?'selected':''}>賽道</option><option value="classroom" ${d.type==='classroom'?'selected':''}>教室</option><option value="art" ${d.type==='art'?'selected':''}>藝術空間</option><option value="other" ${d.type==='other'?'selected':''}>其他</option></select></div><div class="fr"><label>滿班人數</label><input type="number" id="vf-cap" value="${d.capacity||15}" min="1"></div></div><div class="fr"><label>顏色</label><input type="hidden" id="vf-color" value="${d.color}"><div style="margin-top:4px">${sw}</div></div><div class="fr"><label>圖示</label><input type="text" id="vf-icon" value="${d.icon||'📍'}" style="width:60px;font-size:18px;text-align:center"></div><div class="fr"><label>說明</label><input type="text" id="vf-desc" value="${d.description||''}"></div><div class="fr"><label>狀態</label><select id="vf-status"><option value="active" ${d.status==='active'?'selected':''}>使用中</option><option value="inactive" ${d.status==='inactive'?'selected':''}>停用</option></select></div><div style="display:flex;gap:6px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveVenue('${editId}')`:'createVenue()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteVenue('${editId}');closeMod()">封存</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
 function getVFData(){return{name:document.getElementById('vf-name').value.trim(),shortName:document.getElementById('vf-short').value.trim()||document.getElementById('vf-name').value.trim(),type:document.getElementById('vf-type').value,capacity:parseInt(document.getElementById('vf-cap').value)||15,color:document.getElementById('vf-color').value,icon:document.getElementById('vf-icon').value||'📍',description:document.getElementById('vf-desc').value,status:document.getElementById('vf-status').value};}
 async function createVenue(){const d=getVFData();if(!d.name){alert('請填寫場地名稱');return;}venues.push({id:'v'+Date.now(),...d});await saveCol('venues',venues);closeMod();renderVenues();}
 async function saveVenue(id){const d=getVFData();if(!d.name){alert('請填寫場地名稱');return;}const i=venues.findIndex(v=>v.id===id);if(i>=0)venues[i]={...venues[i],...d};await saveCol('venues',venues);closeMod();renderVenues();}
-async function deleteVenue(id){const v=getVenue(id);if(!v)return;if(!confirm(`確認刪除「${v.name}」？`))return;venues=venues.filter(x=>x.id!==id);await saveCol('venues',venues);closeMod();renderVenues();}
+async function deleteVenue(id){
+  const v=venues.find(x=>x.id===id); if(!v) return;
+  const n=sessions.filter(s=>s.venueId===id&&s.status!=='inactive').length;
+  let msg=`封存場地「${v.name}」？`;
+  if(n) msg+=`\n\n⚠ 還有 ${n} 個開課中的班次使用這個場地，建議先把班次改到其他場地。`;
+  const reason=askArchiveReason(msg); if(reason===null) return;
+  moveToArchive('venues',x=>x.id===id,reason||'封存場地');
+  await saveCol('venues',venues); closeMod(); renderVenues();
+  hint('場地已封存 ✓');
+}
 
 // ── SESSIONS ─────────────────────────────────────────
 // ── Session-level run management ─────────────────────────────────
@@ -1011,31 +1030,41 @@ function renderSessions(){
         <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px"><span style="display:inline-flex;align-items:center;gap:3px"><span style="width:18px;height:18px;border-radius:50%;background:${co.color||'#aaa'}30;color:${co.color||'#666'};font-size:9px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${(s.coach||'?')[0]}</span><span style="font-size:11px;color:#555;font-weight:500">${s.coach||'未指定'}</span></span></div>
         <div style="display:flex;align-items:center;gap:6px;background:#f8f8f8;border-radius:8px;padding:5px 7px">${ct?`<span style="font-size:10px" title="${ct.name}">${ct.name.replace(/^\d{4}\s*/,'')}</span><span style="font-size:13px;font-weight:500;color:${totalE>=s.capacity?'#A32D2D':'#27500A'}">${totalE}</span><span style="font-size:10px;color:#999">/ 滿班</span><span style="font-size:13px;font-weight:500">${s.capacity}</span><div class="cap-bar-wrap" style="flex:1"><div class="cap-bar" style="width:${pct}%;background:${totalE>=s.capacity?'var(--red)':pct>=80?'var(--amber)':'var(--green)'}"></div></div>`:`<span style="font-size:10px;color:#aaa">目前沒有排入進行中或未來的期別 · 滿班 ${s.capacity} 人</span>`}</div>
       </div>
-      <div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn btn-blue" style="font-size:11px;padding:3px 9px;background:#E6F1FB;color:#0C447C;border-color:#378ADD" onclick="openSessionRuns('${s.id}')">📋 開課管理</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="toggleSessionStatus('${s.id}')">${off?'重新啟用':'停用'}</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">刪除</button></div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn btn-blue" style="font-size:11px;padding:3px 9px;background:#E6F1FB;color:#0C447C;border-color:#378ADD" onclick="openSessionRuns('${s.id}')">📋 開課管理</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditSession('${s.id}')">編輯</button><button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="toggleSessionStatus('${s.id}')">${off?'重新啟用':'停用'}</button><button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteSession('${s.id}')">封存</button></div>
     </div>`;}).join(''):`<div class="empty" style="grid-column:1/-1">${sessShowInactive?'沒有課程':'沒有開課中的班次'}</div>`;
 }
 function openAddSession(){renderSessionForm(null,{venueId:venues[0]?.id||'',type:'adv',name:'',day:'週一',time:'',coach:(coaches.length?coaches.find(c=>c.active)?.name||coaches[0].name:'馬力歐'),capacity:8,periodLessons:6});}
 function openEditSession(id){const s=getSess(id);if(s)renderSessionForm(id,s);}
 function lessonOpts(cur){return LESSON_OPTIONS.map(n=>`<option value="${n}" ${cur===n?'selected':''}>${n} 堂</option>`).join('');}
 function renderSessionForm(editId,d){const vOpts=venues.map(v=>`<option value="${v.id}" ${d.venueId===v.id?'selected':''}>${v.name}</option>`).join('');const ep=editId?getSessPrice(editId):null;document.getElementById('mod-title').textContent=editId?'編輯課程':'新增課程';document.getElementById('mod-body').innerHTML=`<div class="fr"><label>使用場地</label><select id="sf-venue">${vOpts}<option value="" ${!d.venueId?'selected':''}>未指定</option></select></div><div class="fg"><div class="fr"><label>課程類型 *</label><select id="sf-type">${getSessionTypes().map(t=>`<option value="${t.id}" ${d.type===t.id?'selected':''}>${t.label}</option>`).join('')}</select></div><div class="fr"><label>授課教練 *</label><select id="sf-coach">${(coaches.length?coaches:Object.keys(COACHES)).map(c=>{const name=typeof c==='string'?c:c.name;return`<option ${d.coach===name?'selected':''}>${name}</option>`;}).join('')}</select></div></div><div class="fr"><label>課程名稱 *</label><input type="text" id="sf-name" value="${d.name||''}" placeholder="如：ADV 入門+"></div><div class="fg"><div class="fr"><label>星期 *</label><select id="sf-day">${DAYS.map(x=>`<option ${d.day===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="fr"><label>時間 *</label><input type="text" id="sf-time" value="${d.time||''}" placeholder="16:30-17:30"></div></div><div class="fg"><div class="fr"><label>滿班人數</label><input type="number" id="sf-cap" value="${d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()"></div><div class="fr"><label>填單人數上限 <span style="font-size:10px;color:#999;font-weight:400">（審核前最多收件數）</span></label><input type="number" id="sf-form-limit" value="${d.formLimit||d.capacity||8}" min="1" max="200" step="1" style="width:90px" onwheel="this.blur()" onclick="event.stopPropagation()" placeholder="同滿班人數"></div><div class="fr"><label>每期堂數</label><select id="sf-lessons">${lessonOpts(d.periodLessons||6)}</select></div></div><div class="fr"><label>班次狀態</label><select id="sf-status"><option value="active" ${d.status!=='inactive'?'selected':''}>開課中</option><option value="inactive" ${d.status==='inactive'?'selected':''}>停用（不再開課，歷史資料保留）</option></select></div><div class="info-box" style="margin-bottom:8px">📅 各期的實際上課日期，請到「期別/報名」→ 該期的「課程日期」設定，每一期分開記錄，不會互相影響。</div>
-<div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" ${can('admin')?'':'disabled title="只有管理者可以修改學費"'} placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">刪除</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
+<div class="fr"><label>課程學費 (NT$)</label><input type="number" id="sf-price" value="${ep||''}" ${can('admin')?'':'disabled title="只有管理者可以修改學費"'} placeholder="留空則不設定" min="0" step="100"></div><div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-pink" style="flex:1" onclick="${editId?`saveSession('${editId}')`:'createSession()'}">${editId?'儲存':'確認新增'}</button>${editId?`<button class="btn btn-red" onclick="deleteSession('${editId}');closeMod()">封存</button>`:''}</div>`;document.getElementById('overlay').style.display='flex';}
 function getSFData(){return{venueId:document.getElementById('sf-venue').value||null,type:document.getElementById('sf-type').value,coach:document.getElementById('sf-coach').value,name:document.getElementById('sf-name').value.trim(),day:document.getElementById('sf-day').value,time:document.getElementById('sf-time').value.trim(),capacity:parseInt(document.getElementById('sf-cap').value)||8,formLimit:parseInt(document.getElementById('sf-form-limit')?.value)||parseInt(document.getElementById('sf-cap').value)||8,periodLessons:parseInt(document.getElementById('sf-lessons').value)||6,status:document.getElementById('sf-status')?.value||'active',price:parseFloat(document.getElementById('sf-price').value)||null};}
 async function createSession(){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const s={id:'s'+Date.now(),...d};sessions.push(s);if(d.price!=null){pricing.push({id:'pr'+Date.now(),sessId:s.id,name:s.name+' '+s.day+s.time,price:d.price,note:s.periodLessons+'堂/期'});await saveCol('pricing',pricing);}await saveCol('sessions',sessions);closeMod();renderSessions();}
 async function saveSession(id){const d=getSFData();if(!d.name||!d.time){alert('請填寫名稱與時間');return;}const i=sessions.findIndex(s=>s.id===id);if(i>=0){sessions[i]={...sessions[i],...d};delete sessions[i].startDate;delete sessions[i].endDate;}if(d.price!=null){const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0)pricing[pi].price=d.price;else pricing.push({id:'pr'+Date.now(),sessId:id,name:d.name,price:d.price,note:d.periodLessons+'堂/期'});await saveCol('pricing',pricing);}else{// ③ 定價清空時刪除舊的 pricing，避免開帳單帶入舊金額
 const pi=pricing.findIndex(p=>p.sessId===id);if(pi>=0){pricing.splice(pi,1);await saveCol('pricing',pricing);}}await saveCol('sessions',sessions);closeMod();renderSessions();}
+// ── 封存班次：從未結束的期別拿掉、這些期別的報名一起封存；已結束期別的紀錄保留 ──
 async function deleteSession(id){
-  const s=getSess(id);if(!s)return;
-  const en=enrolls.filter(e=>e.sessionId===id);
-  const tIn=terms.filter(t=>(t.sessions||[]).includes(id));
-  let msg=`確認刪除班次「${s.name} ${s.day} ${s.time}」？`;
-  if(en.length||tIn.length) msg+=`\n\n會一併移除：\n${tIn.length?`・從 ${tIn.length} 個期別中移除\n`:''}${en.length?`・報名紀錄 ${en.length} 筆（點名總覽、續報都會找不到這些學生）\n`:''}・此班次的學費設定\n\n帳單、收款、簽到紀錄會保留。\n💡 如果只是不再開課，建議改按「停用」，資料完整保留、隨時可恢復。`;
-  if(!confirm(msg))return;
-  sessions=sessions.filter(x=>x.id!==id);
-  terms=terms.map(t=>({...t,sessions:(t.sessions||[]).filter(sid=>sid!==id)}));
-  enrolls=enrolls.filter(e=>e.sessionId!==id);
-  pricing=pricing.filter(p=>p.sessId!==id);
-  await saveCol('sessions',sessions);await saveCol('terms',terms);await saveCol('enrolls',enrolls);await saveCol('pricing',pricing);
-  closeMod();renderSessions();renderTerms();renderDash();
+  const s=sessions.find(x=>x.id===id); if(!s) return;
+  const live=terms.filter(t=>(t.sessions||[]).includes(id)&&termStatus(t).key!=='ended');
+  const liveIds=new Set(live.map(t=>t.id));
+  const en=enrolls.filter(e=>e.sessionId===id&&liveIds.has(e.termId));
+  let msg=`封存班次「${s.name} ${s.day} ${s.time}」？`;
+  if(live.length||en.length) msg+=`\n\n會一起處理（還原班次時會一起恢復）：\n${live.length?`・從 ${live.length} 個未結束的期別中拿掉\n`:''}${en.length?`・這些期別的報名 ${en.length} 筆一起封存\n`:''}`;
+  msg+='\n已結束期別的名單、帳單、收款、簽到紀錄都會保留。\n💡 如果只是暫時不開課，建議改按「停用」。';
+  const reason=askArchiveReason(msg); if(reason===null) return;
+  const batch=newArchBatch();
+  terms=terms.map(t=>liveIds.has(t.id)?{...t,sessions:(t.sessions||[]).filter(x=>x!==id)}:t);
+  moveToArchive('sessions',x=>x.id===id,reason||'封存班次',batch,{archivedFromTerms:[...liveIds]});
+  const eIds=new Set(en.map(x=>x.id));
+  moveToArchive('enrolls',e=>eIds.has(e.id),'班次封存',batch);
+  showLoading('封存中…');
+  try{
+    await saveCol('sessions',sessions);
+    if(live.length) await saveCol('terms',terms);
+    if(eIds.size) await saveCol('enrolls',enrolls);
+  }finally{ hideLoading(); }
+  closeMod(); renderSessions(); renderTerms(); renderDash();
+  hint('班次已封存 ✓');
 }
 
 // ── TERMS ────────────────────────────────────────────
@@ -1074,39 +1103,33 @@ async function saveTerm(id){
   await saveCol('terms',terms);closeMod();renderTerms();renderDash();
 }
 // ── 刪除期別：有收款紀錄就不能刪 ──
+// ── 封存期別：這一期的報名與補課一起封存；帳單、收款、簽到都保留 ──
 async function deleteTerm(id){
   const t=terms.find(x=>x.id===id); if(!t) return;
-  const tFees=fees.filter(f=>f.termId===id);
-  const feeIds=new Set(tFees.map(f=>f.id));
-  const money=txns.filter(x=>feeIds.has(x.feeId)&&(x.type==='pay'||x.type==='refund'));
-  if(money.length){
-    alert(`「${t.name}」有 ${money.length} 筆收款或退費紀錄，為保留帳務歷史，不能刪除。\n\n已結束的期別會自動收合，不影響使用；如果是建錯的期別，請先把帳單退費或作廢、移除報名後再刪除。`);
-    return;
-  }
-  const tEnrolls=enrolls.filter(e=>e.termId===id);
-  const tMk=makeupRec.filter(m=>m.termId===id);
-  const tPend=pendingSubs.filter(p=>p.termId===id);
+  const en=enrolls.filter(e=>e.termId===id);
+  const mk=makeupRec.filter(m=>m.termId===id);
+  const pend=pendingSubs.filter(p=>p.termId===id&&(p.status||'pending')==='pending');
   const parts=[];
-  if(tEnrolls.length) parts.push(`報名紀錄 ${tEnrolls.length} 筆`);
-  if(tFees.length) parts.push(`未收款的帳單 ${tFees.length} 張`);
-  if(tMk.length) parts.push(`補課紀錄 ${tMk.length} 筆`);
-  if(tPend.length) parts.push(`家長報名表 ${tPend.length} 筆`);
-  let msg=`確認刪除期別「${t.name}」？`;
-  if(parts.length) msg+=`\n\n以下資料會一併刪除：\n・${parts.join('\n・')}`;
-  msg+='\n\n學生資料與簽到紀錄會保留。刪除後無法復原。';
-  if(!confirm(msg)) return;
-  terms=terms.filter(x=>x.id!==id);
-  enrolls=enrolls.filter(e=>e.termId!==id);
-  fees=fees.filter(f=>f.termId!==id);
-  txns=txns.filter(x=>!feeIds.has(x.feeId));
-  makeupRec=makeupRec.filter(m=>m.termId!==id);
-  pendingSubs=pendingSubs.filter(p=>p.termId!==id);
-  showLoading('刪除中…');
-  await saveCol('terms',terms); await saveCol('enrolls',enrolls); await saveCol('fees',fees);
-  await saveCol('txns',txns); await saveCol('makeup',makeupRec); await saveCol('pending',pendingSubs);
-  hideLoading();
+  if(en.length) parts.push(`報名紀錄 ${en.length} 筆`);
+  if(mk.length) parts.push(`補課紀錄 ${mk.length} 筆`);
+  let msg=`封存期別「${t.name}」？`;
+  if(parts.length) msg+=`\n\n以下資料會一起封存（還原期別時會一起恢復）：\n・${parts.join('\n・')}`;
+  msg+='\n\n學生資料、帳單、收款與簽到紀錄都會保留。';
+  if(pend.length) msg+=`\n\n⚠ 還有 ${pend.length} 筆待審的家長報名表，封存後請到「報名QR」退回。`;
+  msg+=openFeeWarn(f=>f.termId===id);
+  const reason=askArchiveReason(msg); if(reason===null) return;
+  const batch=newArchBatch();
+  moveToArchive('terms',x=>x.id===id,reason||'封存期別',batch);
+  moveToArchive('enrolls',e=>e.termId===id,'期別封存',batch);
+  moveToArchive('makeup',m=>m.termId===id,'期別封存',batch);
+  showLoading('封存中…');
+  try{
+    await saveCol('terms',terms);
+    if(en.length) await saveCol('enrolls',enrolls);
+    if(mk.length) await saveCol('makeup',makeupRec);
+  }finally{ hideLoading(); }
   renderTerms(); renderDash(); buildFeTermFilter();
-  hint('期別已刪除 ✓');
+  hint('期別已封存 ✓');
 }
 // ══════════════════════════════════════════════════════
 // 可編輯報名名單（取代原本的 openTermRoster 與 removeEnroll）
@@ -1218,7 +1241,7 @@ async function rosterSetStatus(enrollId, status, termId) {
 async function removeEnroll(id, termId) {
   const e = enrolls.find(x=>x.id===id); if (!e) return;
   const st = getSt(e.studentId);
-  if (!confirm(`確認將「${st.name!=='?'?st.name:(e.studentName||'')}」從名單移除？`)) return;
+  if (!confirm(`確認將「${st.name!=='?'?st.name:(e.studentName||'')}」從名單移除？\n移除的報名會放到「🗄 封存」，需要時可以還原。`)) return;
   const wasEnrolled = e.status === 'enrolled';
   enrolls = enrolls.filter(x=>x.id!==id);
   // 正取被移除時，詢問是否遞補第一位候補
@@ -1638,7 +1661,7 @@ function renderMakeup() {
 
       '<div style="display:flex;gap:5px;margin-top:6px">' +
         (m.status==='done'?'':'<button class="btn btn-outline" style="font-size:11px;padding:2px 8px" onclick="markMakeupDone(&quot;'+m.id+'&quot;)">標記已完成</button>') +
-        '<button class="btn btn-red" style="font-size:11px;padding:2px 8px" onclick="deleteMakeup(&quot;'+m.id+'&quot;)">刪除</button>' +
+        '<button class="btn btn-red" style="font-size:11px;padding:2px 8px" onclick="deleteMakeup(&quot;'+m.id+'&quot;)">移除</button>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -1652,7 +1675,7 @@ async function markMakeupDone(mkId) {
 }
 
 async function deleteMakeup(mkId) {
-  if(!confirm('確認刪除此補課記錄？')) return;
+  if(!confirm('確認取消此補課記錄？\n取消後會放到「🗄 封存」，需要時可以還原。')) return;
   makeupRec = makeupRec.filter(x=>x.id!==mkId);
   await saveCol('makeup', makeupRec);
   renderMakeup(); renderDash();
@@ -1712,7 +1735,7 @@ function renderBills(list, noBillRows=[]){
   body.innerHTML = list.map(f => {
     const s   = feeStatus(f);
     const st  = getSt(f.studentId);
-    const t   = f.termId ? terms.find(x => x.id === f.termId) : null;
+    const t   = f.termId ? getTerm(f.termId) : null;
     const isVoucher = f.type === 'voucher';
     const isRef = isClosedFee(f);
     const borderColor = isRef ? '#ccc' : s.label==='逾期' ? 'var(--red)' : s.bal>0&&s.paid>0 ? 'var(--amber)' : s.bal<=0 ? 'var(--green)' : 'var(--blue)';
@@ -1785,7 +1808,7 @@ const noBillUnpaid = [];
   enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
     const key2 = e.studentId+':'+e.termId+':'+e.sessionId;
     if (!isEnrollBilled(e) && !noBillUnpaid.find(r=>r.key===key2)) {
-      const st2=getSt(e.studentId); const s2=getSess(e.sessionId); const t2=terms.find(x=>x.id===e.termId);
+      const st2=getSt(e.studentId); const s2=getSess(e.sessionId); const t2=getTerm(e.termId);
       const pr2=s2?getSessPrice(s2.id):null;
       noBillUnpaid.push({key:key2,name:st2.name,sessName:s2?s2.name+' '+s2.day+' '+s2.time:'—',termName:t2?t2.name:'—',price:pr2,studentId:e.studentId,termId:e.termId,sessId:e.sessionId});
     }
@@ -1815,7 +1838,7 @@ const noBillUnpaid = [];
 
   body.innerHTML = summaryHTML + unpaidList.map(({f, s}) => {
     const st = getSt(f.studentId);
-    const t  = f.termId ? terms.find(x => x.id === f.termId) : null;
+    const t  = f.termId ? getTerm(f.termId) : null;
     const isOverdue = f.dueDate && f.dueDate < today();
     return `<div class="card" style="border-left:3px solid ${isOverdue?'var(--red)':s.paid>0?'var(--amber)':'var(--blue)'}">
       <div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:5px">
@@ -1924,7 +1947,7 @@ async function recordRefund(feeId){
   closeMod();renderFee();renderStudents();renderDash();
   hint(r.mode==='void'?'已退費，帳單已作廢 ✓':'已部分退費，應繳金額已調整 ✓');
 }
-function openFeeHist(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);const rel=txns.filter(t=>t.feeId===feeId).sort((a,b)=>b.date.localeCompare(a.date));document.getElementById('mod-title').textContent='帳單明細 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">說明</span><span>${f.description}</span></div>${f.termStartDate?`<div class="rrow"><span style="color:#999">上課期間</span><span>${fmtD(f.termStartDate)} — ${fmtD(f.termEndDate)}</span></div>`:''}<div class="rrow rtotal"><span>餘額</span><span style="color:${s.bal>0?'#A32D2D':'#27500A'}">${s.bal>0?fmt(s.bal):'結清'}</span></div></div>${s.paid>s.net&&!f.status?`<div style="background:#FCEBEB;color:#501313;border-radius:8px;padding:7px 10px;font-size:11px;margin-bottom:8px">⚠ 換班後溢繳 ${fmt(s.paid-s.net)}，請退還差額</div>`:''}${(f.history||[]).length?`<div style="background:#E6F1FB;border-radius:8px;padding:7px 10px;font-size:11px;color:#0C447C;margin-bottom:8px"><div style="font-weight:500;margin-bottom:3px">調整紀錄</div>${f.history.map(x=>`<div>${x.date} ${x.type}：${x.from} → ${x.to}（${fmt(x.oldAmount)} → ${fmt(x.newAmount)}）</div>`).join('')}</div>`:''}${rel.map(t=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:0.5px solid #e0e0e0"><div style="flex:1"><div style="font-size:12px">${{pay:'收款',disc:'折扣',refund:'退費'}[t.type]||t.type}${t.note?' · '+t.note:''}</div><div style="font-size:10px;color:#999">${t.date} · ${t.method||'—'}</div></div><div style="font-size:13px;font-weight:500;color:${t.type==='pay'?'#27500A':'#A32D2D'}">${t.type==='pay'?'+':'-'}${fmt(t.amount)}</div></div>`).join('')||'<div class="empty">尚無交易</div>'}${s.bal>0&&!f.status?`<button class="btn btn-green" style="width:100%;margin-top:8px" onclick="closeMod();openPayMod('${feeId}')">收款</button>`:''}<button class="btn btn-outline" style="width:100%;margin-top:6px;font-size:12px" onclick="openDocHistory('fees','${feeId}','帳單')">📋 這張帳單的修改歷史</button>`;document.getElementById('overlay').style.display='flex';}
+function openFeeHist(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);const rel=txns.filter(t=>t.feeId===feeId).sort((a,b)=>(b.date||'').localeCompare(a.date||''));document.getElementById('mod-title').textContent='帳單明細 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">說明</span><span>${f.description}</span></div>${f.termStartDate?`<div class="rrow"><span style="color:#999">上課期間</span><span>${fmtD(f.termStartDate)} — ${fmtD(f.termEndDate)}</span></div>`:''}<div class="rrow rtotal"><span>餘額</span><span style="color:${s.bal>0?'#A32D2D':'#27500A'}">${s.bal>0?fmt(s.bal):'結清'}</span></div></div>${s.paid>s.net&&!f.status?`<div style="background:#FCEBEB;color:#501313;border-radius:8px;padding:7px 10px;font-size:11px;margin-bottom:8px">⚠ 換班後溢繳 ${fmt(s.paid-s.net)}，請退還差額</div>`:''}${(f.history||[]).length?`<div style="background:#E6F1FB;border-radius:8px;padding:7px 10px;font-size:11px;color:#0C447C;margin-bottom:8px"><div style="font-weight:500;margin-bottom:3px">調整紀錄</div>${f.history.map(x=>`<div>${x.date} ${x.type}：${x.from} → ${x.to}（${fmt(x.oldAmount)} → ${fmt(x.newAmount)}）</div>`).join('')}</div>`:''}${rel.map(t=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:0.5px solid #e0e0e0"><div style="flex:1"><div style="font-size:12px">${{pay:'收款',disc:'折扣',refund:'退費'}[t.type]||t.type}${t.note?' · '+t.note:''}</div><div style="font-size:10px;color:#999">${t.date} · ${t.method||'—'}</div></div><div style="font-size:13px;font-weight:500;color:${t.type==='pay'?'#27500A':'#A32D2D'}">${t.type==='pay'?'+':'-'}${fmt(t.amount)}</div></div>`).join('')||'<div class="empty">尚無交易</div>'}${s.bal>0&&!f.status?`<button class="btn btn-green" style="width:100%;margin-top:8px" onclick="closeMod();openPayMod('${feeId}')">收款</button>`:''}<button class="btn btn-outline" style="width:100%;margin-top:6px;font-size:12px" onclick="openDocHistory('fees','${feeId}','帳單')">📋 這張帳單的修改歷史</button>`;document.getElementById('overlay').style.display='flex';}
 // 原本的「刪除帳單」：改為作廢，帳單與相關紀錄全部保留
 async function deleteFee(feeId){
   const f=fees.find(x=>x.id===feeId); if(!f) return;
@@ -2049,7 +2072,7 @@ function openEditEnroll(enrollId) {
     ${isWait?`<button class="btn btn-green" style="width:100%;margin-bottom:6px" onclick="promoteWaitlist('${enrollId}')">✓ 手動升為正式報名</button>`:''}
     <div style="display:flex;gap:6px">
       <button class="btn btn-pink" style="flex:1" onclick="saveEnrollChange('${enrollId}')">儲存更換</button>
-      <button class="btn btn-red" onclick="deleteEnroll('${enrollId}')">刪除報名</button>
+      <button class="btn btn-red" onclick="deleteEnroll('${enrollId}')">移除報名</button>
     </div>`;
   document.getElementById('overlay').style.display = 'flex';
 }
@@ -2066,11 +2089,11 @@ async function promoteWaitlist(enrollId) {
 }
 
 async function deleteEnroll(enrollId) {
-  if (!confirm('確認刪除此報名記錄？')) return;
+  if (!confirm('確認移除此報名記錄？\n移除後會放到「🗄 封存」，需要時可以還原。')) return;
   enrolls = enrolls.filter(e=>e.id!==enrollId);
   await saveCol('enrolls', enrolls);
   closeMod(); renderStudents(); renderDash();
-  hint('報名記錄已刪除 ✓');
+  hint('報名記錄已移除 ✓');
 }
 
 
@@ -2146,8 +2169,8 @@ function renderStudents(){try{updateOrphanBtn();}catch(e){}const q=(document.get
             if(to>0) return '<span class="pill pill-red" style="font-size:9px">'+(t?t.name.replace('2026 ',''):'?')+' 欠'+fmt(to)+'</span>';
             return '<span class="pill pill-green" style="font-size:9px">'+(t?t.name.replace('2026 ',''):'?')+' 結清</span>';
           }).join(' ');
-        })()}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openDocHistory('students','${st.id}','${st.name}')">歷史</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">刪除</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div>${(()=>{const a=studentAttStats(st.id);return a?`<div title="${a.termName}"><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">${a.present} / ${a.leave}<span style="font-size:10px;color:${a.leave>a.leaveMax?'#A32D2D':'#999'};font-weight:400"> (可補${Math.max(0,a.leaveMax-a.leave)})</span></div></div>`:`<div><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">—</div></div>`;})()}</div><div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:flex-start">${stE.map(e=>{
-        const s=getSess(e.sessionId);const t=terms.find(x=>x.id===e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;
+        })()}<button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openEditStudent('${st.id}')">編輯</button><button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="openDocHistory('students','${st.id}','${st.name}')">歷史</button><button class="btn btn-red" style="font-size:10px;padding:2px 7px" onclick="delStu('${st.id}')">封存</button></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:5px;margin:5px 0;background:#f8f8f8;border-radius:8px;padding:7px 9px"><div><div style="font-size:10px;color:#999">年齡</div><div style="font-size:12px;font-weight:500">${fmtAge(getStudentAge(st).ageY,getStudentAge(st).ageM)||'—'}</div></div><div><div style="font-size:10px;color:#999">身高</div><div style="font-size:12px;font-weight:500">${st.height?st.height+' cm':'—'}</div></div><div><div style="font-size:10px;color:#999">每期堂數</div><div style="font-size:12px;font-weight:500">${st.period||'—'} 堂</div></div>${(()=>{const a=studentAttStats(st.id);return a?`<div title="${a.termName}"><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">${a.present} / ${a.leave}<span style="font-size:10px;color:${a.leave>a.leaveMax?'#A32D2D':'#999'};font-weight:400"> (可補${Math.max(0,a.leaveMax-a.leave)})</span></div></div>`:`<div><div style="font-size:10px;color:#999">本期出席 / 請假</div><div style="font-size:12px;font-weight:500">—</div></div>`;})()}</div><div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:flex-start">${stE.map(e=>{
+        const s=getSess(e.sessionId);const t=getTerm(e.termId);const v=s?getVenue(s.venueId):null;const pr=s?getSessPrice(s.id):null;
         const termFees=fees.filter(f=>f.studentId===st.id&&f.termId===e.termId&&!isClosedFee(f)&&(feeCoversSession(f,e.sessionId)||isLegacyUnlinkedFee(f)));
         const termOwed=termFees.reduce((a,f)=>a+feeStatus(f).bal,0);
         let feeTag='';
@@ -2211,7 +2234,7 @@ function nsFilterSess(){
   nsAutoLessons();
 }
 function openAddStudent(){document.getElementById('mod-title').textContent='新增學生';document.getElementById('mod-body').innerHTML=stuFormHTML({})+'<button class="btn btn-pink" style="width:100%;margin-top:8px" onclick="addStu()">確認新增</button>';document.getElementById('overlay').style.display='flex';setTimeout(nsAutoLessons,50);}
-function openEditStudent(id){const st=students.find(s=>s.id===id);if(!st)return;document.getElementById('mod-title').textContent='編輯 — '+st.name;document.getElementById('mod-body').innerHTML=stuFormHTML(st)+`<div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-pink" style="flex:1" onclick="saveStudent('${id}')">儲存</button><button class="btn btn-red" onclick="delStu('${id}');closeMod()">刪除</button></div>`;document.getElementById('overlay').style.display='flex';setTimeout(nsAutoLessons,50);}
+function openEditStudent(id){const st=students.find(s=>s.id===id);if(!st)return;document.getElementById('mod-title').textContent='編輯 — '+st.name;document.getElementById('mod-body').innerHTML=stuFormHTML(st)+`<div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-pink" style="flex:1" onclick="saveStudent('${id}')">儲存</button><button class="btn btn-red" onclick="delStu('${id}');closeMod()">封存</button></div>`;document.getElementById('overlay').style.display='flex';setTimeout(nsAutoLessons,50);}
 async function addStu(){
   const d=getStuData();
   if(!d.name){alert('請輸入學生姓名');return;}
@@ -2261,57 +2284,47 @@ async function saveStudent(id){
 }
 // ── 刪除學生：連同報名、帳單、收款、補課、多元券一併清除，不留孤兒資料 ──
 // ── 刪除學生：有收款紀錄就不能刪，保護帳務歷史 ──
+// ── 封存學生：未結束期別的報名、未完成的補課、未來的預約一起封存；歷史紀錄與帳務都保留 ──
 async function delStu(id){
   const st=students.find(s=>s.id===id); if(!st) return;
-  const stFees=fees.filter(f=>f.studentId===id);
-  const feeIds=new Set(stFees.map(f=>f.id));
-  const stTxns=txns.filter(t=>feeIds.has(t.feeId)||t.studentId===id);
-  const money=stTxns.filter(t=>t.type==='pay'||t.type==='refund');
-  if(money.length){
-    alert(`「${st.name}」有 ${money.length} 筆收款或退費紀錄，為保留帳務歷史，不能刪除。\n\n如果只是不再上課，請在名單中移除報名即可；學生資料會保留，之後回來上課也能直接沿用。`);
-    return;
-  }
-  const stEnrolls=enrolls.filter(e=>e.studentId===id);
-  const stMk=makeupRec.filter(m=>m.studentId===id);
-  const stVp=voucherPacks.filter(v=>v.studentId===id);
-  const stVb=voucherBookings.filter(b=>b.studentId===id);
+  const en=enrolls.filter(e=>e.studentId===id&&termIsLive(e.termId));
+  const mk=makeupRec.filter(m=>m.studentId===id&&m.status!=='done'&&(!m.termId||termIsLive(m.termId)));
+  const vb=voucherBookings.filter(b=>b.studentId===id&&b.status==='booked'&&(b.slotDate||'9999')>=today());
   const parts=[];
-  if(stEnrolls.length) parts.push(`報名紀錄 ${stEnrolls.length} 筆`);
-  if(stFees.length) parts.push(`未收款的帳單 ${stFees.length} 張`);
-  if(stMk.length) parts.push(`補課紀錄 ${stMk.length} 筆`);
-  if(stVp.length||stVb.length) parts.push(`多元券 ${stVp.length} 包、預約 ${stVb.length} 筆`);
-  let msg=`確認刪除學生「${st.name}」？`;
-  if(parts.length) msg+=`\n\n以下資料會一併刪除：\n・${parts.join('\n・')}`;
-  msg+='\n\n刪除後無法復原。';
-  if(!confirm(msg)) return;
-  students=students.filter(s=>s.id!==id);
-  enrolls=enrolls.filter(e=>e.studentId!==id);
-  fees=fees.filter(f=>f.studentId!==id);
-  txns=txns.filter(t=>!(feeIds.has(t.feeId)||t.studentId===id));
-  makeupRec=makeupRec.filter(m=>m.studentId!==id);
-  voucherPacks=voucherPacks.filter(v=>v.studentId!==id);
-  voucherBookings=voucherBookings.filter(b=>b.studentId!==id);
-  showLoading('刪除中…');
-  await saveCol('students',students); await saveCol('enrolls',enrolls);
-  await saveCol('fees',fees); await saveCol('txns',txns); await saveCol('makeup',makeupRec);
-  await saveCol('voucherPacks',voucherPacks); await saveCol('voucherBookings',voucherBookings);
-  hideLoading();
+  if(en.length) parts.push(`進行中或未開始期別的報名 ${en.length} 筆`);
+  if(mk.length) parts.push(`還沒完成的補課 ${mk.length} 筆`);
+  if(vb.length) parts.push(`未來的多元課預約 ${vb.length} 筆`);
+  let msg=`封存學生「${st.name}」？`;
+  if(parts.length) msg+=`\n\n以下資料會一起封存（還原學生時會一起恢復）：\n・${parts.join('\n・')}`;
+  msg+='\n\n已結束期別的上課紀錄、帳單、收款與使用券都會保留。';
+  msg+=openFeeWarn(f=>f.studentId===id);
+  const reason=askArchiveReason(msg); if(reason===null) return;
+  const batch=newArchBatch();
+  const eIds=new Set(en.map(x=>x.id)), mIds=new Set(mk.map(x=>x.id)), bIds=new Set(vb.map(x=>x.id));
+  moveToArchive('students',s=>s.id===id,reason||'封存學生',batch);
+  moveToArchive('enrolls',e=>eIds.has(e.id),'學生封存',batch);
+  moveToArchive('makeup',m=>mIds.has(m.id),'學生封存',batch);
+  moveToArchive('voucherBookings',b=>bIds.has(b.id),'學生封存',batch);
+  showLoading('封存中…');
+  try{
+    await saveCol('students',students);
+    if(eIds.size) await saveCol('enrolls',enrolls);
+    if(mIds.size) await saveCol('makeup',makeupRec);
+    if(bIds.size) await saveCol('voucherBookings',voucherBookings);
+  }finally{ hideLoading(); }
   renderStudents(); renderDash(); renderFee();
-  hint('學生已刪除 ✓');
+  hint('學生已封存 ✓');
 }
 
 // ── 孤兒資料：學生已不存在，但報名／帳單等仍留著 ──
 // 孤兒資料：收款與退費紀錄一律保留，不列入清理
+// ── 孤兒資料：學生或期別真的不存在（封存的不算），改為封存 ──
 function findOrphans(){
-  const sIds=new Set(students.map(s=>s.id));
-  const fIds=new Set(fees.map(f=>f.id));
-  const tIds=new Set(terms.map(t=>t.id));
+  const sIds=new Set([...students,...archivedOf('students')].map(s=>s.id));
+  const tIds=new Set([...terms,...archivedOf('terms')].map(t=>t.id));
   return {
     enrolls: enrolls.filter(e=>!sIds.has(e.studentId)||!tIds.has(e.termId)),
-    fees: fees.filter(f=>!sIds.has(f.studentId)&&!txns.some(t=>t.feeId===f.id&&(t.type==='pay'||t.type==='refund'))),
-    txns: txns.filter(t=>t.type!=='pay'&&t.type!=='refund'&&(!fIds.has(t.feeId)||(t.studentId&&!sIds.has(t.studentId)))),
     makeup: makeupRec.filter(m=>!sIds.has(m.studentId)),
-    vPacks: voucherPacks.filter(v=>!sIds.has(v.studentId)),
     vBooks: voucherBookings.filter(b=>!sIds.has(b.studentId))
   };
 }
@@ -2325,23 +2338,25 @@ function updateOrphanBtn(){
 async function cleanupOrphans(){
   const o=findOrphans();
   const lines=[];
-  if(o.enrolls.length) lines.push(`報名紀錄 ${o.enrolls.length} 筆（學生或期別已刪除，或只有姓名沒有學生檔案）`);
-  if(o.fees.length) lines.push(`帳單 ${o.fees.length} 張，合計 ${fmt(o.fees.reduce((a,f)=>a+f.amount,0))}`);
-  if(o.txns.length) lines.push(`收款／退費紀錄 ${o.txns.length} 筆`);
+  if(o.enrolls.length) lines.push(`報名紀錄 ${o.enrolls.length} 筆（學生或期別找不到，或只有姓名沒有學生檔案）`);
   if(o.makeup.length) lines.push(`補課紀錄 ${o.makeup.length} 筆`);
-  if(o.vPacks.length||o.vBooks.length) lines.push(`多元券 ${o.vPacks.length} 包、預約 ${o.vBooks.length} 筆`);
-  if(!lines.length){ alert('沒有孤兒資料'); return; }
-  if(!confirm('找到以下對應不到學生（或期別）的資料：\n・'+lines.join('\n・')+'\n\n確定全部刪除？刪除後無法復原。')) return;
-  const del=k=>new Set(o[k].map(x=>x.id));
-  const dE=del('enrolls'),dF=del('fees'),dT=del('txns'),dM=del('makeup'),dP=del('vPacks'),dB=del('vBooks');
-  enrolls=enrolls.filter(x=>!dE.has(x.id)); fees=fees.filter(x=>!dF.has(x.id)); txns=txns.filter(x=>!dT.has(x.id)&&!dF.has(x.feeId));
-  makeupRec=makeupRec.filter(x=>!dM.has(x.id)); voucherPacks=voucherPacks.filter(x=>!dP.has(x.id)); voucherBookings=voucherBookings.filter(x=>!dB.has(x.id));
-  showLoading('清理中…');
-  await saveCol('enrolls',enrolls); await saveCol('fees',fees); await saveCol('txns',txns);
-  await saveCol('makeup',makeupRec); await saveCol('voucherPacks',voucherPacks); await saveCol('voucherBookings',voucherBookings);
-  hideLoading();
-  renderStudents(); renderDash(); renderFee(); renderTerms();
-  hint('孤兒資料已清理 ✓');
+  if(o.vBooks.length) lines.push(`多元課預約 ${o.vBooks.length} 筆`);
+  if(!lines.length){ alert('沒有孤兒資料'); updateOrphanBtn(); return; }
+  if(!confirm('找到以下對應不到學生（或期別）的資料：\n・'+lines.join('\n・')+'\n\n要全部改為封存嗎？封存後仍可在「🗄 封存」查看或還原。')) return;
+  const batch=newArchBatch();
+  const ids=k=>new Set(o[k].map(x=>x.id));
+  const dE=ids('enrolls'), dM=ids('makeup'), dB=ids('vBooks');
+  moveToArchive('enrolls',x=>dE.has(x.id),'孤兒資料整理',batch);
+  moveToArchive('makeup',x=>dM.has(x.id),'孤兒資料整理',batch);
+  moveToArchive('voucherBookings',x=>dB.has(x.id),'孤兒資料整理',batch);
+  showLoading('整理中…');
+  try{
+    if(dE.size) await saveCol('enrolls',enrolls);
+    if(dM.size) await saveCol('makeup',makeupRec);
+    if(dB.size) await saveCol('voucherBookings',voucherBookings);
+  }finally{ hideLoading(); }
+  updateOrphanBtn(); renderStudents(); renderDash();
+  hint('孤兒資料已封存 ✓');
 }
 function openIssueFeeForStudent(stId) {
   const st = getSt(stId);
@@ -2363,7 +2378,7 @@ function openIssueFeeForStudent(stId) {
   // Build list of courses with fees
   const courseItems = stEnrolls.map(e => {
     const s = getSess(e.sessionId);
-    const t = terms.find(x => x.id === e.termId);
+    const t = getTerm(e.termId);
     const pr = s ? getSessPrice(s.id) : null;
     const isMultiType = s && s.type === 'multi'; // 多元課程需購券
     const termFees = fees.filter(f => f.studentId === stId && f.termId === e.termId && !isClosedFee(f) && (feeCoversSession(f,e.sessionId)||isLegacyUnlinkedFee(f)));
@@ -2726,7 +2741,7 @@ function renderTerms() {
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditTerm('${t.id}')">編輯</button>
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="cloneTerm('${t.id}')">複製下期</button>
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px;color:#1D9E75;border-color:#1D9E75" onclick="openRenewTerm('${t.id}')">↪ 續報到下期</button>
-        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteTerm('${t.id}')">刪除</button>
+        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteTerm('${t.id}')">封存</button>
       </div>
     </div>`;
   }).join('') || '<div class="empty">沒有符合條件的期別</div>';
@@ -3602,7 +3617,7 @@ function openMakeupSlot(mkId, studentId, origSessId, termId) {
     </div>
     <div style="display:flex;gap:6px;margin-top:4px">
       <button class="btn btn-pink" style="flex:1" onclick="saveMakeupSlot('${mkId||''}','${studentId}','${origSessId}','${termId}')">✓ 確認補課安排</button>
-      ${mk?`<button class="btn btn-red" onclick="removeMakeupSlot('${mk.id}','${termId}')">刪除</button>`:''}
+      ${mk?`<button class="btn btn-red" onclick="removeMakeupSlot('${mk.id}','${termId}')">移除</button>`:''}
     </div>`;
   document.getElementById('overlay').style.display = 'flex';
 }
@@ -3645,7 +3660,7 @@ async function saveMakeupSlot(mkId, studentId, origSessId, termId) {
 }
 
 async function removeMakeupSlot(mkId, termId) {
-  if (!confirm('確認刪除此補課安排？')) return;
+  if (!confirm('確認取消此補課安排？\n取消後會放到「🗄 封存」，需要時可以還原。')) return;
   makeupRec = makeupRec.filter(x=>x.id!==mkId);
   await saveCol('makeup',makeupRec);
   closeMod();
@@ -3723,7 +3738,7 @@ function renderCoachForm(editId,d) {
     </div>
     <div style="display:flex;gap:6px;margin-top:4px">
       <button class="btn btn-pink" style="flex:1" onclick="${editId?`saveCoach('${editId}')`:'createCoach()'}">${editId?'儲存':'確認新增'}</button>
-      ${editId?`<button class="btn btn-red" onclick="deleteCoach('${editId}');closeMod()">刪除</button>`:''}
+      ${editId?`<button class="btn btn-red" onclick="deleteCoach('${editId}');closeMod()">封存</button>`:''}
     </div>`;
   document.getElementById('overlay').style.display='flex';
 }
@@ -3772,11 +3787,12 @@ async function deleteCoach(id) {
   const c=coaches.find(x=>x.id===id); if(!c) return;
   const nS=sessions.filter(s=>s.coach===c.name&&s.status!=='inactive').length;
   const nM=multiSchedule.filter(s=>s.coach===c.name&&s.date>=today()).length;
-  let msg=`確認刪除「${c.name}」？`;
-  if(nS||nM) msg+=`\n\n⚠ 還有 ${nS?`開課中班次 ${nS} 個`:''}${nS&&nM?'、':''}${nM?`未來多元課 ${nM} 堂`:''}由這位教練授課，刪除後這些班次會顯示沒有對應的教練。\n建議先把班次改給其他教練，或改用「停用」保留紀錄。`;
-  if(!confirm(msg)) return;
-  coaches=coaches.filter(x=>x.id!==id);
+  let msg=`封存教練「${c.name}」？`;
+  if(nS||nM) msg+=`\n\n⚠ 還有 ${nS?`開課中班次 ${nS} 個`:''}${nS&&nM?'、':''}${nM?`未來多元課 ${nM} 堂`:''}由這位教練授課，建議先把班次改給其他教練。`;
+  const reason=askArchiveReason(msg); if(reason===null) return;
+  moveToArchive('coaches',x=>x.id===id,reason||'封存教練');
   await saveCol('coaches',coaches); closeMod(); renderCoaches();
+  hint('教練已封存 ✓');
 }
 
 // ══════════════════════════════════════════════════
@@ -3999,7 +4015,7 @@ function calcReportFee() {
     <div style="overflow-x:auto"><table class="report-table">
       <thead><tr><th>開帳日期</th><th>學生</th><th>期別</th><th>課程說明</th><th>金額</th><th>已繳</th><th>餘額</th><th>狀態</th></tr></thead>
       <tbody>${list.sort((a,b)=>(a.issuedDate||'').localeCompare(b.issuedDate||'')).map(f=>{
-        const s=feeStatus(f); const st=getSt(f.studentId); const t=terms.find(x=>x.id===f.termId);
+        const s=feeStatus(f); const st=getSt(f.studentId); const t=getTerm(f.termId);
         return`<tr>
           <td style="white-space:nowrap">${fmtD(f.issuedDate)}</td>
           <td style="font-weight:500">${st.name}</td>
@@ -4022,7 +4038,7 @@ function calcReportFee() {
   // ⑩ key 加入 sessionId
   const noBill2=[];
   enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
-    const t2=terms.find(x=>x.id===e.termId);
+    const t2=getTerm(e.termId);
     if(fTerm2&&e.termId!==fTerm2)return;
     if(fFrom2&&t2&&t2.endDate<fFrom2)return;
     if(fTo2&&t2&&t2.startDate>fTo2)return;
@@ -4071,7 +4087,7 @@ function feeQuickFilter() {
     const noBillRows = [];
     enrolls.filter(e=>e.status==='enrolled').forEach(e=>{
       if(!isEnrollBilled(e)){
-        const st=getSt(e.studentId); const s=getSess(e.sessionId); const t=terms.find(x=>x.id===e.termId);
+        const st=getSt(e.studentId); const s=getSess(e.sessionId); const t=getTerm(e.termId);
         const pr=s?getSessPrice(s.id):null;
         if(!noBillRows.find(r=>r.studentId===e.studentId&&r.termId===e.termId))
           noBillRows.push({studentName:st.name,sessName:s?s.name+' '+s.day+' '+s.time:'—',termName:t?t.name:'—',price:pr,studentId:e.studentId,sessId:e.sessionId,termId:e.termId});
@@ -4155,7 +4171,7 @@ function exportCurrentReport() {
     case 'fee-range': {
       csv='\uFEFF開帳日期,學生,期別,說明,金額,已繳,餘額,狀態\n';
       fees.forEach(f=>{
-        const s=feeStatus(f);const st=getSt(f.studentId);const t=terms.find(x=>x.id===f.termId);
+        const s=feeStatus(f);const st=getSt(f.studentId);const t=getTerm(f.termId);
         csv+=`${f.issuedDate||''},${st.name},${t?t.name:''},${f.description||''},${f.amount},${s.paid},${s.bal},${s.label}\n`;
       });
       filename='學費清單.csv'; break;
@@ -4503,7 +4519,7 @@ function renderMultiSchedule() {
         ${!isPast?`<button class="btn btn-pink" style="font-size:11px;padding:3px 9px" onclick="openAddBookingToSlot('${slot.id}')">+ 加入學員</button>`:''}
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openSlotAttendance('${slot.id}')">📋 點名</button>
         <button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditMultiSlot('${slot.id}')">編輯</button>
-        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteMultiSlot('${slot.id}')">刪除</button>
+        <button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteMultiSlot('${slot.id}')">移除</button>
       </div>
     </div>`;
   }).join('');
@@ -4602,7 +4618,7 @@ function openEditMultiSlot(slotId) {
     <div class="fr"><label>備註</label><input type="text" id="es-note" value="${slot.note||''}"></div>
     <div style="display:flex;gap:6px">
       <button class="btn btn-pink" style="flex:1" onclick="saveMultiSlot('${slotId}')">儲存</button>
-      <button class="btn btn-red" onclick="deleteMultiSlot('${slotId}')">刪除</button>
+      <button class="btn btn-red" onclick="deleteMultiSlot('${slotId}')">移除</button>
     </div>`;
   document.getElementById('overlay').style.display = 'flex';
 }
@@ -4620,12 +4636,12 @@ async function saveMultiSlot(slotId) {
 }
 
 async function deleteMultiSlot(slotId) {
-  if (!confirm('確認刪除此時段？已預約的學員也會取消。')) return;
+  if (!confirm('確認移除此時段？已預約的學員也會取消。\n時段會放到「🗄 封存」，需要時可以還原。')) return;
   multiSchedule = multiSchedule.filter(s=>s.id!==slotId);
   voucherBookings = voucherBookings.map(b => b.slotId===slotId ? {...b,status:'cancelled'} : b);
   await saveCol('multiSchedule', multiSchedule);
   await saveCol('voucherBookings', voucherBookings);
-  closeMod(); renderMultiSchedule(); hint('已刪除 ✓');
+  closeMod(); renderMultiSchedule(); hint('已移除 ✓');
 }
 
 // ── 加入學員（教練手動）─────────────────────────────────────────
@@ -5118,7 +5134,7 @@ function renderCoaches() {
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:5px">' +
         '<button class="btn btn-outline" style="font-size:11px;padding:3px 9px" onclick="openEditCoach(&quot;'+c.id+'&quot;)">編輯</button>' +
-        '<button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteCoach(&quot;'+c.id+'&quot;)">刪除</button>' +
+        '<button class="btn btn-red" style="font-size:11px;padding:3px 9px" onclick="deleteCoach(&quot;'+c.id+'&quot;)">封存</button>' +
       '</div>' +
     '</div>';
   });
@@ -6529,13 +6545,19 @@ async function doRestore(){
   // 還原前先保留一份目前的資料
   if(!await exportAllData('before-restore')){ if(!confirm('目前資料的安全備份沒有成功，仍要繼續還原嗎？')) return; }
   showLoading('還原中，請勿關閉頁面…');
+  const kept={}, archivedN={};
   try{
     for(const col of BACKUP_COLS){
       const want=data.collections[col]; if(!Array.isArray(want)) continue;
       const keep=new Set(want.map(x=>String(x.__id)));
       const cur=await db.collection(col).get();
       const ops=[];
-      cur.docs.forEach(d=>{if(!keep.has(d.id))ops.push({del:true,id:d.id});});
+      cur.docs.forEach(d=>{
+        if(keep.has(d.id)) return;
+        if(ARCHIVE_COLS.has(col)){ const x=d.data(); if(!x.archived){ ops.push({id:d.id,data:{...x,...archMeta('從備份還原時，這筆不在備份檔中')}}); archivedN[col]=(archivedN[col]||0)+1; } }
+        else if(RESTORE_DELETABLE.has(col)) ops.push({del:true,id:d.id});
+        else kept[col]=(kept[col]||0)+1;
+      });
       want.forEach(x=>{const {__id,...rest}=x;ops.push({id:String(__id),data:rest});});
       for(let i=0;i<ops.length;i+=400){
         const b=db.batch();
@@ -6545,7 +6567,13 @@ async function doRestore(){
     }
     await auditNote('backup','restore',`從備份還原（備份時間 ${new Date(data.exportedAt).toLocaleString('zh-TW',{hour12:false})}）`,'restore',[]);
     hideLoading();
-    alert('還原完成，頁面將重新載入。');
+    const name={fees:'帳單',txns:'收款紀錄',refundReqs:'退費申請',voucherPacks:'使用券',signin:'簽到',pending:'家長報名表',signinRequests:'掃碼簽到請求'};
+    const a=Object.entries(archivedN).map(([c,n])=>`${ARCH_LABEL[c]||c} ${n} 筆`);
+    const k=Object.entries(kept).map(([c,n])=>`${name[c]||c} ${n} 筆`);
+    let msg='還原完成，頁面將重新載入。';
+    if(a.length) msg+=`\n\n備份之後新增的資料已改為封存：${a.join('、')}。`;
+    if(k.length) msg+=`\n\n備份之後新增的帳務與紀錄依規定不刪除，已保留：${k.join('、')}。如有需要請到收費頁作廢。`;
+    alert(msg);
     location.reload();
   }catch(e){
     hideLoading();
@@ -6577,11 +6605,11 @@ function auditColFor(col){ return AUDIT_MONEY_COLS.has(col)?'auditLogMoney':'aud
 
 const AUDIT_COL_LABEL={students:'學生',enrolls:'報名',fees:'帳單',txns:'收款紀錄',terms:'期別',sessions:'班次',venues:'場地',pricing:'學費設定',makeup:'補課',pending:'家長報名表',coaches:'教練',voucherPacks:'使用券',voucherBookings:'多元課預約',multiSchedule:'多元課排課',signin:'簽到',sessionTypes:'課程類型',signinRequests:'掃碼簽到',backup:'備份與還原',admins:'帳號',refundReqs:'退費申請'};
 
-const AUDIT_FIELD_LABEL={name:'名稱',status:'狀態',amount:'金額',sessionId:'班次',studentId:'學生',termId:'期別',description:'說明',dueDate:'繳費期限',phone:'電話',parent:'家長',lineId:'LINE',gender:'性別',ageY:'年齡(歲)',ageM:'年齡(月)',height:'身高',capacity:'滿班人數',formLimit:'填單上限',periodLessons:'每期堂數',coach:'教練',day:'星期',time:'時段',venueId:'場地',price:'學費',startDate:'開始日',endDate:'結束日',enrollStartDate:'報名開始',enrollEndDate:'報名截止',preRegStartDate:'預報名開始',sessions:'班次',holidays:'休課日',sessionDates:'課程日期',makeupSessionId:'補課班次',makeupDate:'補課日期',leaveDate:'請假日',type:'類型',method:'方式',note:'備註',date:'日期',voidReason:'作廢原因',courses:'課程',quantity:'張數',expiryDate:'到期日',history:'調整紀錄',leaveMax:'可補次數',active:'授課中'};
+const AUDIT_FIELD_LABEL={name:'名稱',status:'狀態',amount:'金額',sessionId:'班次',studentId:'學生',termId:'期別',description:'說明',dueDate:'繳費期限',phone:'電話',parent:'家長',lineId:'LINE',gender:'性別',ageY:'年齡(歲)',ageM:'年齡(月)',height:'身高',capacity:'滿班人數',formLimit:'填單上限',periodLessons:'每期堂數',coach:'教練',day:'星期',time:'時段',venueId:'場地',price:'學費',startDate:'開始日',endDate:'結束日',enrollStartDate:'報名開始',enrollEndDate:'報名截止',preRegStartDate:'預報名開始',sessions:'班次',holidays:'休課日',sessionDates:'課程日期',makeupSessionId:'補課班次',makeupDate:'補課日期',leaveDate:'請假日',type:'類型',method:'方式',note:'備註',date:'日期',voidReason:'作廢原因',courses:'課程',quantity:'張數',expiryDate:'到期日',history:'調整紀錄',leaveMax:'可補次數',active:'授課中',archived:'封存',archivedBy:'封存人',archiveReason:'封存原因'};
 
 const AUDIT_VALUE_LABEL={enrolled:'正取',waitlist:'候補',preregister:'預報名',pending:'待審',approved:'已通過',rejected:'已拒絕',scheduled:'已排課',done:'已完成',void:'已作廢',refunded:'已退費',inactive:'停用',active:'開課中',present:'出席',leave:'請假',absent:'缺席',attended:'出席',booked:'已預約',cancelled:'已取消',pay:'收款',refund:'退費',disc:'折扣'};
 
-const AUDIT_NOISE=new Set(['createdBy','createdAt','updatedAt','_dirty']);
+const AUDIT_NOISE=new Set(['createdBy','createdAt','updatedAt','_dirty','archivedAt','archiveBatch','archivedFromTerms']);
 
 let _auditContext='';
 
@@ -6600,7 +6628,7 @@ function auditValue(field, v){
   try{
     if(field==='studentId'&&v) return getSt(v).name||v;
     if((field==='sessionId'||field==='makeupSessionId'||field==='originalSessionId')&&v){const s=getSess(v);return s?`${s.name} ${s.day} ${s.time}`:v;}
-    if(field==='termId'&&v){const t=terms.find(x=>x.id===v);return t?t.name:v;}
+    if(field==='termId'&&v){const t=getTerm(v);return t?t.name:v;}
     if(field==='venueId'&&v){const x=getVenue(v);return x?x.name:v;}
   }catch(e){}
   return auditShort(v);
@@ -6647,7 +6675,7 @@ function auditEntry(col, docId, action, before, after){
     at:new Date().toISOString(), by:w.by, uid:w.uid,
     col, colLabel:AUDIT_COL_LABEL[col]||col, docId:String(docId), docKey:col+'/'+docId,
     label:String(auditDocLabel(col,d,docId)).slice(0,120),
-    action, changes: action==='update'?auditDiff(before,after):action==='create'?auditDiff({},after).slice(0,12):auditDiff(before,{}).slice(0,12),
+    action, changes: (action==='update'||action==='archive'||action==='unarchive')?auditDiff(before,after):action==='create'?auditDiff({},after).slice(0,12):auditDiff(before,{}).slice(0,30),
     context:_auditContext||''
   };
 }
@@ -6669,9 +6697,9 @@ async function auditNote(col, docId, label, action, changes){
 // ══════════════════════════════════════════════════════
 // 操作紀錄查詢畫面
 // ══════════════════════════════════════════════════════
-const AUDIT_ACTION_LABEL={create:'新增',update:'修改',delete:'刪除',export:'備份',restore:'還原'};
+const AUDIT_ACTION_LABEL={create:'新增',update:'修改',delete:'永久刪除',export:'備份',restore:'還原',archive:'封存',unarchive:'取消封存'};
 
-const AUDIT_ACTION_COLOR={create:'#27500A',update:'#0C447C',delete:'#A32D2D',export:'#555',restore:'#A32D2D'};
+const AUDIT_ACTION_COLOR={create:'#27500A',update:'#0C447C',delete:'#A32D2D',export:'#555',restore:'#A32D2D',archive:'#854F0B',unarchive:'#27500A'};
 
 let _auditRows=[];
 
@@ -7006,7 +7034,7 @@ function rolesText(acc){
 const FN_PERM={
   admin:['cleanupOrphans','delStu','deleteTerm','deleteSession','deleteVenue','createVenue','saveVenue','openAddVenue','openEditVenue','moveVenue',
     'openAddCoach','openEditCoach','saveCoach','createCoach','deleteCoach','deleteFee','openAccountMod','createAccount','openEditAccount','saveAccountRoles',
-    'toggleAccount','resendSetPassword','cancelInvite','openBackupMod','exportAllData','startRestore','doRestore','approveRefund','rejectRefund','deleteCustomType'],
+    'toggleAccount','resendSetPassword','cancelInvite','purgeArchived','openBackupMod','exportAllData','startRestore','doRestore','approveRefund','rejectRefund','deleteCustomType'],
   money:['openIssueFee','openIssueFeeForStudent','openIssueFeeForTerm','openIssueFeePreset','issueFee','submitMultiCourseFee','openPayMod','recordPay',
     'openRefundMod','recordRefund','openFeeHist','openIssueVoucherForStudent','openAddVoucher','openAddVoucherForStudent','createVoucherPack','openVoucherHistory',
     'feeQuickFilter','clearFeeQuick','mcfRecalc','ifPrev','ifSessChange','ifTermChange','renderFeeForm','applyMonthFilter','setThisMonth','calcReportFee'],
@@ -7290,7 +7318,7 @@ async function preSaveChecks(col, ops){
     if(creates.length){
       const srv=await queryIn('enrolls','studentId',creates.map(e=>e.studentId));
       for(const e of creates){
-        const dup=srv.find(x=>x.id!==e.id&&!m.has(String(x.id))&&x.termId===e.termId&&x.sessionId===e.sessionId&&x.studentId===e.studentId&&_activeEnroll(x.status));
+        const dup=srv.find(x=>x.id!==e.id&&!m.has(String(x.id))&&x.termId===e.termId&&x.sessionId===e.sessionId&&x.studentId===e.studentId&&!x.archived&&_activeEnroll(x.status));
         if(dup){ const s=getSess(e.sessionId); return `「${getSt(e.studentId).name}」剛剛已經被其他人加入「${s?s.name+' '+s.day+' '+s.time:''}」。`; }
       }
     }
@@ -7299,7 +7327,7 @@ async function preSaveChecks(col, ops){
       const srv=(await db.collection('enrolls').where('termId','==',tid).get()).docs.map(d=>({id:d.id,...d.data()}));
       for(const e of toEnrolled.filter(x=>x.termId===tid)){
         const s=getSess(e.sessionId); if(!s) continue;
-        const other=x=>x.id!==e.id&&x.sessionId===e.sessionId&&x.status==='enrolled';
+        const other=x=>x.id!==e.id&&x.sessionId===e.sessionId&&x.status==='enrolled'&&!x.archived;
         const srvCnt=srv.filter(other).length, locCnt=enrolls.filter(other).length;
         if(srvCnt>locCnt&&srvCnt>=s.capacity) return `「${s.name} ${s.day} ${s.time}」的名額剛剛被其他人用掉了（目前正取 ${srvCnt}／滿班 ${s.capacity}）。`;
       }
@@ -7363,6 +7391,282 @@ async function checkDuplicatePay(feeId, amt){
   }catch(e){ console.warn('checkDuplicatePay',e); }
   return true;
 }
+
+// ══════════════════════════════════════════════════════
+// v8.2.3 封存：所有資料不實體刪除，一律改成封存；帳單維持作廢
+// 只有沒有任何報名、課程安排與收款紀錄的建錯或測試資料，管理者可以永久刪除
+// ══════════════════════════════════════════════════════
+function archivedOf(col){ return _archived[col] || (_archived[col] = []); }
+
+function getLocalCol(col){
+  switch(col){
+    case 'students': return students;   case 'terms': return terms;         case 'sessions': return sessions;
+    case 'enrolls': return enrolls;     case 'makeup': return makeupRec;    case 'voucherBookings': return voucherBookings;
+    case 'coaches': return coaches;     case 'venues': return venues;       case 'multiSchedule': return multiSchedule;
+    case 'fees': return fees;           case 'txns': return txns;           case 'pricing': return pricing;
+    case 'pending': return pendingSubs; case 'voucherPacks': return voucherPacks;
+  }
+  return [];
+}
+
+const ARCH_LABEL={students:'學生',terms:'期別',sessions:'班次',enrolls:'報名',makeup:'補課',multiSchedule:'多元課時段',voucherBookings:'多元課預約',coaches:'教練',venues:'場地'};
+
+const ARCH_DEFAULT_REASON={enrolls:'從名單移除',makeup:'取消補課',voucherBookings:'取消預約',multiSchedule:'移除時段'};
+
+const PURGE_COLS=new Set(['students','terms','sessions','coaches','venues']);
+
+function archEsc(v){ return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function fmtArchAt(iso){ try{ return iso?new Date(iso).toLocaleString('zh-TW',{hour12:false}):'—'; }catch(e){ return iso||'—'; } }
+
+function archMeta(reason, batch){
+  const m={archived:true, archivedAt:new Date().toISOString(), archivedBy:auth.currentUser?.email||'', archiveReason:String(reason||'').slice(0,200)};
+  if(batch) m.archiveBatch=batch;
+  return m;
+}
+
+function newArchBatch(){ return 'ab'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+function stripArch(x){ const {archived,archivedAt,archivedBy,archiveReason,archiveBatch,archivedFromTerms,...rest}=x; return rest; }
+
+function termIsLive(tid){ const t=getTerm(tid); return !!t && termStatus(t).key!=='ended'; }
+
+function archPermOf(col){ return PURGE_COLS.has(col)?'admin':'edit'; }
+
+// 儲存前：使用中清單＋封存區合併；從使用中清單消失的資料自動改成封存，不會從雲端刪除
+function archiveMerge(col, items){
+  const m=_snapOf(col), purge=_purge[col]||new Set();
+  const list=(items||[]).filter(x=>x&&x.id!=null);
+  const ids=new Set(list.map(x=>String(x.id)));
+  _archived[col]=archivedOf(col).filter(a=>!ids.has(String(a.id))&&!purge.has(String(a.id)));
+  const arch=_archived[col], inArch=new Set(arch.map(a=>String(a.id)));
+  m.forEach((prev,id)=>{
+    if(ids.has(id)||inArch.has(id)||purge.has(id)) return;
+    let d=null; try{ d=JSON.parse(prev); }catch(e){} if(!d) return;
+    arch.push(d.archived?d:{...d, ...archMeta((_archCtx&&_archCtx.reason)||ARCH_DEFAULT_REASON[col]||'從清單移除', _archCtx&&_archCtx.batch)});
+  });
+  return [...list, ...arch];
+}
+
+// 把使用中清單裡符合條件的資料移到封存區（還沒寫入，之後要 saveCol）
+function moveToArchive(col, pred, reason, batch, extra){
+  const keep=[], moved=[];
+  getLocalCol(col).forEach(x=>{ if(pred(x)) moved.push({...x, ...archMeta(reason,batch), ...(extra||{})}); else keep.push(x); });
+  if(moved.length){ archivedOf(col).push(...moved); setLocalCol(col, keep); }
+  return moved;
+}
+
+function moveFromArchive(col, pred){
+  const back=archivedOf(col).filter(pred);
+  if(!back.length) return [];
+  _archived[col]=archivedOf(col).filter(x=>!pred(x));
+  setLocalCol(col, [...getLocalCol(col), ...back.map(stripArch)]);
+  return back;
+}
+
+function askArchiveReason(msg){
+  const r=prompt(msg+'\n\n封存後資料會保留，隨時可以在「🗄 封存」查看或還原。\n請輸入封存原因（可留空），按「確定」封存：','');
+  return r==null?null:String(r).trim();
+}
+
+function openFeeWarn(pred){
+  const open=(fees||[]).filter(f=>pred(f)&&!isClosedFee(f)&&feeStatus(f).bal>0);
+  if(!open.length) return '';
+  return `\n\n⚠ 還有 ${open.length} 張未結清的帳單（共 ${fmt(open.reduce((a,f)=>a+feeStatus(f).bal,0))}），封存後仍會留在收費頁，請記得收款或作廢。`;
+}
+
+// ══════════ 已封存資料：查看、還原、永久刪除 ══════════
+const ARCH_TYPES=['students','terms','sessions','enrolls','makeup','multiSchedule','voucherBookings','coaches','venues'];
+
+let _archTab='students', _archQ='';
+
+function openArchiveMod(tab){
+  if(tab) _archTab=tab;
+  document.getElementById('mod-title').textContent='🗄 已封存資料';
+  const tabs=ARCH_TYPES.map(c=>`<button class="btn ${c===_archTab?'btn-pink':'btn-outline'}" style="font-size:11px;padding:3px 9px;margin:0 4px 4px 0" onclick="openArchiveMod('${c}')">${ARCH_LABEL[c]} ${archivedOf(c).length}</button>`).join('');
+  document.getElementById('mod-body').innerHTML=`
+    <div class="info-box" style="font-size:12px;line-height:1.6">封存的資料不會出現在平常的畫面，但不會被刪除，也不會自動清除，這裡隨時查得到，需要時可以還原。<br>只有「沒有任何報名、課程安排與收款紀錄」的建錯或測試資料，管理者才能永久刪除；刪除前的內容會留在「📋 紀錄」。</div>
+    <div style="margin:8px 0">${tabs}</div>
+    <input type="text" id="arch-q" placeholder="搜尋名稱、原因、封存人" value="${archEsc(_archQ)}" oninput="_archQ=this.value;renderArchiveList()" style="width:100%;margin-bottom:8px;box-sizing:border-box">
+    <div id="arch-list"></div>`;
+  document.getElementById('overlay').style.display='flex';
+  renderArchiveList();
+}
+
+function renderArchiveList(){
+  const el=document.getElementById('arch-list'); if(!el) return;
+  const col=_archTab, q=(_archQ||'').trim().toLowerCase();
+  const rows=archivedOf(col).map(d=>({d,label:auditDocLabel(col,d,d.id)}))
+    .filter(r=>!q||(r.label+' '+(r.d.archiveReason||'')+' '+(r.d.archivedBy||'')).toLowerCase().includes(q))
+    .sort((a,b)=>(b.d.archivedAt||'').localeCompare(a.d.archivedAt||''));
+  if(!rows.length){ el.innerHTML='<div style="color:#999;font-size:12px;padding:14px;text-align:center">沒有已封存的'+ARCH_LABEL[col]+'</div>'; return; }
+  const canRestore=can(archPermOf(col)), canPurge=can('admin')&&PURGE_COLS.has(col);
+  const btn='font-size:11px;padding:2px 9px;margin-left:4px';
+  el.innerHTML=rows.slice(0,300).map(({d,label})=>{
+    const id=archEsc(String(d.id)).replace(/\\/g,'\\\\');
+    const purgeOk=canPurge&&purgeBlockers(col,d).length===0;
+    return `<div style="border:1px solid #eee;border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:12px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap">
+        <div style="min-width:0"><b>${archEsc(label)}</b>
+          <div style="color:#888;font-size:11px;margin-top:2px">封存於 ${fmtArchAt(d.archivedAt)}・${archEsc(d.archivedBy||'')}${d.archiveReason?'・'+archEsc(d.archiveReason):''}</div></div>
+        <div style="white-space:nowrap">
+          <button class="btn btn-outline" style="${btn}" onclick="viewArchived('${col}','${id}')">查看</button>
+          ${canRestore?`<button class="btn btn-outline" style="${btn}" onclick="restoreArchived('${col}','${id}')">還原</button>`:''}
+          ${purgeOk?`<button class="btn btn-red" style="${btn}" onclick="purgeArchived('${col}','${id}')">永久刪除</button>`:''}
+        </div>
+      </div></div>`;
+  }).join('')+(rows.length>300?'<div style="color:#999;font-size:11px;text-align:center">只顯示最新 300 筆，請用搜尋縮小範圍</div>':'');
+}
+
+function viewArchived(col,id){
+  const d=archivedOf(col).find(x=>String(x.id)===String(id)); if(!d) return;
+  const skip=new Set(['id','archived','archiveBatch','archivedFromTerms']);
+  const lab={archivedAt:'封存時間',archivedBy:'封存人',archiveReason:'封存原因',createdBy:'建立人',createdAt:'建立時間'};
+  const tr=(k,v)=>`<tr><td style="color:#888;padding:3px 10px 3px 0;white-space:nowrap;vertical-align:top">${archEsc(k)}</td><td style="padding:3px 0;word-break:break-all">${archEsc(v)}</td></tr>`;
+  const rows=Object.keys(d).filter(k=>!skip.has(k)).map(k=>tr(lab[k]||AUDIT_FIELD_LABEL[k]||k, k==='archivedAt'?fmtArchAt(d[k]):auditValue(k,d[k]))).join('');
+  let extra='';
+  if(col==='students'){
+    const en=[...enrolls,...archivedOf('enrolls')].filter(e=>e.studentId===d.id);
+    extra+=`<div style="font-weight:500;margin:12px 0 4px">上課紀錄（${en.length}）</div>`+(en.map(e=>{const t=getTerm(e.termId),s=getSess(e.sessionId);return `<div style="font-size:12px;padding:2px 0">${archEsc(t?t.name:'—')}・${archEsc(s?s.name+' '+s.day+' '+s.time:'—')}・${archEsc(AUDIT_VALUE_LABEL[e.status]||e.status||'')}${e.archived?' <span style="color:#854F0B">(已封存)</span>':''}</div>`;}).join('')||'<div style="font-size:12px;color:#999">沒有</div>');
+    if(can('money')){
+      const fs=fees.filter(f=>f.studentId===d.id);
+      extra+=`<div style="font-weight:500;margin:12px 0 4px">帳單（${fs.length}）</div>`+(fs.map(f=>`<div style="font-size:12px;padding:2px 0">${archEsc(f.description||'')}・${fmt(f.amount)}・${feeStatus(f).label}</div>`).join('')||'<div style="font-size:12px;color:#999">沒有</div>');
+    }
+  }
+  if(col==='terms'||col==='sessions'){
+    const k=col==='terms'?'termId':'sessionId';
+    const en=[...enrolls,...archivedOf('enrolls')].filter(e=>e[k]===d.id);
+    extra+=`<div style="font-size:12px;margin-top:10px;color:#555">相關報名 ${en.length} 筆（其中已封存 ${en.filter(e=>e.archived).length} 筆）${can('money')?`，帳單 ${fees.filter(f=>f[k]===d.id).length} 張`:''}</div>`;
+  }
+  const b=purgeBlockers(col,d);
+  const note=PURGE_COLS.has(col)?(b.length?`<div style="font-size:11px;color:#999;margin-top:10px">這筆資料${archEsc(b.join('、'))}，只能封存、不能永久刪除。</div>`:`<div style="font-size:11px;color:#999;margin-top:10px">這筆資料沒有任何報名、課程安排與收款紀錄，管理者可以永久刪除。</div>`):'';
+  document.getElementById('mod-title').textContent='🗄 '+ARCH_LABEL[col]+'：'+auditDocLabel(col,d,d.id);
+  document.getElementById('mod-body').innerHTML=`
+    <button class="btn btn-outline" style="font-size:11px;padding:2px 9px;margin-bottom:8px" onclick="openArchiveMod()">← 回到封存清單</button>
+    <table style="font-size:12px;width:100%">${rows}</table>${extra}${note}
+    <div style="display:flex;gap:6px;margin-top:12px">
+      <button class="btn btn-outline" style="flex:1" onclick="openDocHistory('${col}','${archEsc(String(d.id))}')">📋 這筆的修改紀錄</button>
+      ${can(archPermOf(col))?`<button class="btn btn-pink" style="flex:1" onclick="restoreArchived('${col}','${archEsc(String(d.id))}')">還原</button>`:''}
+    </div>`;
+  document.getElementById('overlay').style.display='flex';
+}
+
+// 還原前要先還原的資料（例如報名要先有學生、期別、班次）
+function restoreBlocker(col,d){
+  const active=(c,id)=>getLocalCol(c).some(x=>x.id===id);
+  if(col==='enrolls'){
+    if(d.studentId&&!active('students',d.studentId)) return `學生「${getSt(d.studentId).name}」還在封存中，請先還原學生。`;
+    if(!active('terms',d.termId)) return `期別「${(getTerm(d.termId)||{}).name||'—'}」還在封存中，請先還原期別。`;
+    if(!active('sessions',d.sessionId)){ const s=getSess(d.sessionId); return `班次「${s?s.name+' '+s.day+' '+s.time:'—'}」還在封存中，請先還原班次。`; }
+    if(enrolls.some(e=>e.id!==d.id&&e.studentId===d.studentId&&e.termId===d.termId&&e.sessionId===d.sessionId&&_activeEnroll(e.status))) return '這位學生在同一期同一班已經有報名了，不需要還原。';
+  }
+  if(col==='makeup'&&d.studentId&&!active('students',d.studentId)) return `學生「${getSt(d.studentId).name}」還在封存中，請先還原學生。`;
+  if(col==='voucherBookings'){
+    if(d.studentId&&!active('students',d.studentId)) return `學生「${getSt(d.studentId).name}」還在封存中，請先還原學生。`;
+    if(d.slotId&&!active('multiSchedule',d.slotId)) return '這堂多元課時段還在封存中，請先還原時段。';
+  }
+  return null;
+}
+
+async function restoreArchived(col,id){
+  if(!can(archPermOf(col))){ alert('你的身份不能還原這類資料'); return; }
+  const sid=String(id);
+  const d=archivedOf(col).find(x=>String(x.id)===sid); if(!d) return;
+  const label=auditDocLabel(col,d,d.id);
+  const block=restoreBlocker(col,d); if(block){ alert(block); return; }
+  const kids=['students','terms','sessions'].includes(col)&&d.archiveBatch?['enrolls','makeup','voucherBookings']:[];
+  const batchOf=c=>archivedOf(c).filter(x=>x.archiveBatch===d.archiveBatch);
+  const cnt=kids.map(c=>[c,batchOf(c).length]).filter(([,n])=>n);
+  let msg=`還原${ARCH_LABEL[col]}「${label}」？`;
+  if(cnt.length) msg+=`\n\n當初一起封存的資料也會一起恢復：\n・`+cnt.map(([c,n])=>`${ARCH_LABEL[c]} ${n} 筆`).join('\n・')+'\n（對應的學生、期別或班次還在封存中的，會先保留在封存區）';
+  if(!confirm(msg)) return;
+  showLoading('還原中…');
+  let skipped=0;
+  try{
+    moveFromArchive(col,x=>String(x.id)===sid);
+    await saveCol(col,getLocalCol(col));
+    if(col==='sessions'&&Array.isArray(d.archivedFromTerms)&&d.archivedFromTerms.length){
+      terms=terms.map(t=>d.archivedFromTerms.includes(t.id)&&!(t.sessions||[]).includes(d.id)?{...t,sessions:[...(t.sessions||[]),d.id]}:t);
+      await saveCol('terms',terms);
+    }
+    for(const c of kids){
+      const all=batchOf(c); if(!all.length) continue;
+      const ok=[]; all.forEach(x=>{ if(restoreBlocker(c,x)) skipped++; else ok.push(String(x.id)); });
+      if(!ok.length) continue;
+      const set=new Set(ok);
+      moveFromArchive(c,x=>set.has(String(x.id)));
+      await saveCol(c,getLocalCol(c));
+    }
+  }finally{ hideLoading(); }
+  rerenderAll(); if(col==='venues') try{renderVenues();}catch(e){} if(col==='coaches') try{renderCoaches();}catch(e){}
+  openArchiveMod();
+  hint('已還原 ✓');
+  if(skipped) alert(`已還原「${label}」。另有 ${skipped} 筆一起封存的資料，因為對應的學生、期別或班次還在封存中，先保留在封存區。`);
+}
+
+// 永久刪除的條件：沒有任何報名、課程安排與收款紀錄
+function purgeBlockers(col,d){
+  if(!PURGE_COLS.has(col)) return ['屬於上課紀錄'];
+  const all=c=>[...getLocalCol(c),...archivedOf(c)];
+  const id=d.id, out=[];
+  const signinHas=f=>Object.entries(signinRec||{}).some(([k,r])=>f(k,r||{}));
+  if(col==='students'){
+    if(all('enrolls').some(e=>e.studentId===id)) out.push('有報名紀錄');
+    if(all('makeup').some(m=>m.studentId===id)) out.push('有補課紀錄');
+    if(all('voucherBookings').some(b=>b.studentId===id)) out.push('有多元課預約');
+    if((voucherPacks||[]).some(v=>v.studentId===id)) out.push('有使用券');
+    if((fees||[]).some(f=>f.studentId===id)) out.push('有帳單');
+    if((txns||[]).some(t=>t.studentId===id)) out.push('有收款紀錄');
+    if(signinHas((k,r)=>Object.prototype.hasOwnProperty.call(r,id))) out.push('有簽到紀錄');
+  }
+  if(col==='terms'){
+    if(all('enrolls').some(e=>e.termId===id)) out.push('有報名紀錄');
+    if(all('makeup').some(m=>m.termId===id)) out.push('有補課紀錄');
+    if((fees||[]).some(f=>f.termId===id)) out.push('有帳單');
+    if((pendingSubs||[]).some(p=>p.termId===id)) out.push('有家長報名表');
+  }
+  if(col==='sessions'){
+    if(all('enrolls').some(e=>e.sessionId===id)) out.push('有報名紀錄');
+    if(all('terms').some(t=>(t.sessions||[]).includes(id))) out.push('有期別排了這個班次');
+    if((fees||[]).some(f=>f.sessionId===id||(Array.isArray(f.courses)&&f.courses.some(c=>c.sessId===id)))) out.push('有帳單');
+    if(all('makeup').some(m=>m.originalSessionId===id||m.makeupSessionId===id)) out.push('有補課紀錄');
+    if(signinHas(k=>k.split('|')[0]===id)) out.push('有簽到紀錄');
+  }
+  if(col==='coaches'){
+    if(all('sessions').some(s=>s.coach===d.name)||all('multiSchedule').some(s=>s.coach===d.name)) out.push('有帶過的班次或多元課');
+  }
+  if(col==='venues'){
+    if(all('sessions').some(s=>s.venueId===id)) out.push('有班次使用這個場地');
+  }
+  return out;
+}
+
+async function purgeArchived(col,id){
+  if(!can('admin')) return;
+  const sid=String(id);
+  const d=archivedOf(col).find(x=>String(x.id)===sid); if(!d) return;
+  const label=auditDocLabel(col,d,d.id);
+  if(!PURGE_COLS.has(col)){ alert('這類資料只能封存，不能永久刪除。'); return; }
+  const b=purgeBlockers(col,d);
+  if(b.length){ alert(`「${label}」${b.join('、')}，只能封存、不能永久刪除。`); return; }
+  const typed=prompt(`永久刪除${ARCH_LABEL[col]}「${label}」？\n\n只用在建錯或測試的資料。刪除後無法還原，刪除前的內容會留在「📋 紀錄」。\n\n請輸入「永久刪除」四個字確認：`,'');
+  if(typed===null) return;
+  if(typed.trim()!=='永久刪除'){ alert('沒有輸入「永久刪除」，已取消。'); return; }
+  const purge=_purge[col]||(_purge[col]=new Set());
+  purge.add(sid);
+  _archived[col]=archivedOf(col).filter(x=>String(x.id)!==sid);
+  _auditContext='永久刪除建錯或測試的資料';
+  showLoading('刪除中…');
+  try{
+    await saveCol(col,getLocalCol(col));
+    if(col==='sessions'){ const n=pricing.length; pricing=pricing.filter(p=>p.sessId!==sid); if(pricing.length!==n) await saveCol('pricing',pricing); }
+  }finally{ _auditContext=''; purge.delete(sid); hideLoading(); }
+  openArchiveMod();
+  hint('已永久刪除 ✓');
+}
+
+// ── 從備份還原：依「不刪除」原則，備份之後新增的資料改為封存或保留，不會刪除 ──
+const RESTORE_DELETABLE=new Set(['pricing','sessionTypes','settings','regStats']);
 </script>
 </body>
 </html>
