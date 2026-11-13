@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v8.1.2 BUILD 20261113-AUDIT -->
+<!-- HOLIWAY v8.1.3 BUILD 20261113-ACCOUNTS -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v8.1.2</title>
+<title>哈樂維 v8.1.3</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -230,7 +230,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.1.2</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.1.3</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -249,6 +249,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
     <div class="user-area">
       <span id="user-email" style="font-size:11px;color:#999"></span>
       <button class="nb" onclick="sw('reg-qr',this)" style="background:#E1F5EE;color:#085041;border-color:#1D9E75">報名QR<span id="pending-badge" style="display:none;margin-left:4px;background:#E24B4A;color:#fff;border-radius:8px;padding:0 6px;font-size:10px"></span></button>
+    <button class="logout-btn" id="acct-btn" style="display:none" onclick="openAccountMod()" title="新增人員、設定角色、停用帳號">👥 帳號</button>
     <button class="logout-btn" onclick="openAuditLog()" title="誰在什麼時候改了什麼">📋 紀錄</button>
     <button class="logout-btn" onclick="openBackupMod()" title="備份與還原">💾 備份</button>
     <button class="logout-btn" onclick="doLogout()">登出</button>
@@ -534,7 +535,7 @@ auth.onAuthStateChanged(user=>{
     checkAdmin(user).then(r=>{
       hideLoading();
       if(r!=='ok'){
-        if(r==='denied') auth.signOut();
+        if(r==='denied'||r==='inactive') auth.signOut();
         document.getElementById('login-screen').style.display='flex';
         document.getElementById('app-screen').style.display='none';
         const btn=document.getElementById('login-btn'); if(btn){btn.disabled=false;btn.textContent='登入';}
@@ -545,6 +546,7 @@ auth.onAuthStateChanged(user=>{
       document.getElementById('login-screen').style.display='none';
       document.getElementById('app-screen').style.display='block';
       document.getElementById('user-email').textContent=user.email;
+      applyAccountUI();
       initApp();
     });
   }else{
@@ -6350,10 +6352,30 @@ function markNav(tab){
 // v8.1.1 ① 管理員名單：只有名單內的帳號能使用管理系統
 // 名單在 Firestore 的 admins 集合，文件 ID = 帳號 UID，只能從 Firebase 主控台新增
 // ══════════════════════════════════════════════════════
+// 登入時確認身分：在名單內 → ok；被停用 → inactive；有邀請 → 自動加入；都沒有 → denied
 async function checkAdmin(user){
   try{
-    const d=await db.collection('admins').doc(user.uid).get();
-    return d.exists?'ok':'denied';
+    const ref=db.collection('admins').doc(user.uid);
+    const d=await ref.get();
+    if(d.exists){
+      const data=d.data()||{};
+      if(data.active===false) return 'inactive';
+      myAccount={uid:user.uid,...data,role:data.role||'admin'};
+      return 'ok';
+    }
+    const email=(user.email||'').toLowerCase();
+    if(email){
+      const inv=await db.collection('invites').doc(email).get().catch(()=>null);
+      if(inv&&inv.exists){
+        const i=inv.data()||{};
+        const doc={email:user.email,name:i.name||email,role:i.role||'staff',active:true,createdBy:i.createdBy||'',createdAt:new Date().toISOString(),via:'invite'};
+        await ref.set(doc);
+        await db.collection('invites').doc(email).delete().catch(()=>{});
+        myAccount={uid:user.uid,...doc};
+        return 'ok';
+      }
+    }
+    return 'denied';
   }catch(e){
     return e&&e.code==='permission-denied'?'denied':'error';
   }
@@ -6362,10 +6384,8 @@ async function checkAdmin(user){
 function showNotAuthorized(user, kind){
   const err=document.getElementById('login-err');
   if(!err) return;
-  if(kind==='error'){
-    err.innerHTML='無法確認帳號權限，請檢查網路後重新整理頁面。';
-    return;
-  }
+  if(kind==='error'){ err.innerHTML='無法確認帳號權限，請檢查網路後重新整理頁面。'; return; }
+  if(kind==='inactive'){ err.innerHTML=`此帳號（${user.email||''}）已被停用，如有疑問請聯絡系統管理者。`; return; }
   err.innerHTML=`此帳號（${user.email||''}）尚未加入管理員名單，無法使用系統。<br>請把以下 UID 交給系統管理者加入名單：<br><span style="font-family:monospace;user-select:all;background:#f5f5f5;padding:2px 6px;border-radius:4px;display:inline-block;margin-top:4px">${user.uid}</span>`;
 }
 
@@ -6518,7 +6538,7 @@ function stampCreator(col, arr){
 // ══════════════════════════════════════════════════════
 const AUDIT_SKIP=new Set(['auditLog','regStats','settings']);
 
-const AUDIT_COL_LABEL={students:'學生',enrolls:'報名',fees:'帳單',txns:'收款紀錄',terms:'期別',sessions:'班次',venues:'場地',pricing:'學費設定',makeup:'補課',pending:'家長報名表',coaches:'教練',voucherPacks:'使用券',voucherBookings:'多元課預約',multiSchedule:'多元課排課',signin:'簽到',sessionTypes:'課程類型',signinRequests:'掃碼簽到',backup:'備份與還原'};
+const AUDIT_COL_LABEL={students:'學生',enrolls:'報名',fees:'帳單',txns:'收款紀錄',terms:'期別',sessions:'班次',venues:'場地',pricing:'學費設定',makeup:'補課',pending:'家長報名表',coaches:'教練',voucherPacks:'使用券',voucherBookings:'多元課預約',multiSchedule:'多元課排課',signin:'簽到',sessionTypes:'課程類型',signinRequests:'掃碼簽到',backup:'備份與還原',admins:'帳號'};
 
 const AUDIT_FIELD_LABEL={name:'名稱',status:'狀態',amount:'金額',sessionId:'班次',studentId:'學生',termId:'期別',description:'說明',dueDate:'繳費期限',phone:'電話',parent:'家長',lineId:'LINE',gender:'性別',ageY:'年齡(歲)',ageM:'年齡(月)',height:'身高',capacity:'滿班人數',formLimit:'填單上限',periodLessons:'每期堂數',coach:'教練',day:'星期',time:'時段',venueId:'場地',price:'學費',startDate:'開始日',endDate:'結束日',enrollStartDate:'報名開始',enrollEndDate:'報名截止',preRegStartDate:'預報名開始',sessions:'班次',holidays:'休課日',sessionDates:'課程日期',makeupSessionId:'補課班次',makeupDate:'補課日期',leaveDate:'請假日',type:'類型',method:'方式',note:'備註',date:'日期',voidReason:'作廢原因',courses:'課程',quantity:'張數',expiryDate:'到期日',history:'調整紀錄',leaveMax:'可補次數',active:'授課中'};
 
@@ -6658,15 +6678,17 @@ async function loadAuditLog(){
   try{
     const toEnd=new Date(to+'T23:59:59.999');const fromStart=new Date(from+'T00:00:00');
     const snap=await db.collection('auditLog').where('at','>=',fromStart.toISOString()).where('at','<=',toEnd.toISOString()).orderBy('at','desc').limit(500).get();
+    if(!document.getElementById('al-list')) return;
     _auditRows=snap.docs.map(d=>d.data());
     const people=[...new Set(_auditRows.map(r=>r.by).filter(Boolean))].sort();
     const sel=document.getElementById('al-by');const cur=sel.value;
     sel.innerHTML='<option value="">全部人員</option>'+people.map(p=>`<option value="${p}" ${p===cur?'selected':''}>${p}</option>`).join('');
     renderAuditList();
-  }catch(e){ el.innerHTML=`<div class="empty" style="color:#A32D2D">讀取失敗：${e&&e.message||e}</div>`; }
+  }catch(e){ if(document.getElementById('al-list')) el.innerHTML=`<div class="empty" style="color:#A32D2D">讀取失敗：${e&&e.message||e}</div>`; }
 }
 
 function renderAuditList(){
+  if(!document.getElementById('al-list')) return;
   const by=document.getElementById('al-by').value, col=document.getElementById('al-col').value, act=document.getElementById('al-act').value;
   const q=(document.getElementById('al-q').value||'').trim().toLowerCase();
   const rows=_auditRows.filter(r=>(!by||r.by===by)&&(!col||r.col===col)&&(!act||r.action===act)&&(!q||JSON.stringify([r.label,r.changes]).toLowerCase().includes(q)));
@@ -6675,14 +6697,180 @@ function renderAuditList(){
 
 // 單筆資料的修改歷史（帳單明細、學生資料等處的「歷史」按鈕）
 async function openDocHistory(col, docId, title){
-  document.getElementById('mod-title').textContent=(title||'')+' — 修改歷史';
+  const myTitle=(title||'')+' — 修改歷史';
+  document.getElementById('mod-title').textContent=myTitle;
   document.getElementById('mod-body').innerHTML='<div class="empty">查詢中…</div>';
   document.getElementById('overlay').style.display='flex';
   try{
     const snap=await db.collection('auditLog').where('docKey','==',col+'/'+docId).limit(200).get();
     const rows=snap.docs.map(d=>d.data()).sort((a,b)=>b.at.localeCompare(a.at));
+    if(!modStillShows(myTitle)) return;
     document.getElementById('mod-body').innerHTML=rows.length?rows.map(r=>auditRowHTML(r,false)).join(''):'<div class="empty">還沒有修改紀錄（v8.1.2 之前的修改不會出現在這裡）</div>';
-  }catch(e){ document.getElementById('mod-body').innerHTML=`<div class="empty" style="color:#A32D2D">讀取失敗：${e&&e.message||e}</div>`; }
+  }catch(e){ if(modStillShows(myTitle)) document.getElementById('mod-body').innerHTML=`<div class="empty" style="color:#A32D2D">讀取失敗：${e&&e.message||e}</div>`; }
+}
+// 查詢回來時，若使用者已關閉或換到別的視窗，就不覆蓋畫面
+function modStillShows(title){
+  return document.getElementById('overlay').style.display==='flex'&&document.getElementById('mod-title').textContent===title;
+}
+
+// ══════════════════════════════════════════════════════
+// v8.1.3 帳號管理：管理者在系統內新增人員、設定角色、停用帳號
+// 名單在 admins/{uid}：email、name、role（admin／staff／coach）、active
+// 既有 Firebase 帳號用「邀請」：invites/{email}，對方下次登入時自動加入名單
+// ══════════════════════════════════════════════════════
+const ROLE_LABEL={admin:'管理者',staff:'行政',coach:'教練'};
+
+let myAccount=null;
+
+// 登入後：顯示姓名與角色，管理者才看得到「帳號」按鈕
+function applyAccountUI(){
+  const el=document.getElementById('user-email');
+  if(el&&myAccount) el.textContent=`${myAccount.name||myAccount.email}（${ROLE_LABEL[myAccount.role]||myAccount.role}）`;
+  const btn=document.getElementById('acct-btn');
+  if(btn) btn.style.display=myAccount&&myAccount.role==='admin'?'':'none';
+}
+
+// 建立帳號用的第二個連線：在這裡建立新帳號，目前登入的管理者不會被登出
+function secondaryAuth(){
+  let app;
+  try{ app=firebase.app('acct-creator'); }catch(e){ app=firebase.initializeApp(firebaseConfig,'acct-creator'); }
+  const a=app.auth(); try{ a.languageCode='zh-TW'; }catch(e){}
+  return a;
+}
+
+function randomPassword(){
+  const c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  let s=''; const r=new Uint32Array(20); (window.crypto||{getRandomValues:a=>a.map(()=>Math.random()*4e9)}).getRandomValues(r);
+  r.forEach(n=>s+=c[n%c.length]); return s;
+}
+
+async function sendSetPasswordMail(email){
+  try{ auth.languageCode='zh-TW'; }catch(e){}
+  await auth.sendPasswordResetEmail(email);
+}
+
+let _accounts=[], _invites=[];
+
+async function openAccountMod(){
+  if(!myAccount||myAccount.role!=='admin'){ alert('只有管理者可以管理帳號'); return; }
+  document.getElementById('mod-title').textContent='帳號管理';
+  document.getElementById('mod-body').innerHTML='<div class="empty">載入中…</div>';
+  document.getElementById('overlay').style.display='flex';
+  await loadAccounts();
+}
+
+async function loadAccounts(){
+  try{
+    const [a,i]=await Promise.all([db.collection('admins').get(),db.collection('invites').get()]);
+    _accounts=a.docs.map(d=>({uid:d.id,...d.data()})).sort((x,y)=>(x.active===false)-(y.active===false)||(x.name||'').localeCompare(y.name||'','zh-Hant'));
+    _invites=i.docs.map(d=>({email:d.id,...d.data()}));
+    if(!modStillShows('帳號管理')) return;
+    renderAccounts();
+  }catch(e){
+    document.getElementById('mod-body').innerHTML=`<div class="empty" style="color:#A32D2D">讀取帳號失敗：${e&&e.message||e}<br>請確認 Firebase 規則已更新到 v8.1.3。</div>`;
+  }
+}
+
+function renderAccounts(){
+  const roleSel=(a,self)=>`<select ${self?'disabled title="不能修改自己的角色"':''} onchange="setAccountRole('${a.uid}',this.value)" style="width:auto;font-size:12px">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${(a.role||'admin')===k?'selected':''}>${v}</option>`).join('')}</select>`;
+  const rows=_accounts.map(a=>{
+    const self=a.uid===myAccount.uid, off=a.active===false;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px solid #eee;flex-wrap:wrap;${off?'opacity:.55':''}">
+      <div style="flex:1;min-width:160px"><div style="font-size:13px;font-weight:500">${a.name||'（未填姓名）'}${self?' <span style="font-size:10px;color:#27500A">（你）</span>':''}${off?' <span class="pill pill-gray" style="font-size:10px">已停用</span>':''}</div><div style="font-size:11px;color:#999">${a.email||a.uid}</div></div>
+      ${roleSel(a,self)}
+      <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="resendSetPassword('${a.email||''}')" ${a.email?'':'disabled'}>寄設定密碼信</button>
+      ${self?'':`<button class="btn ${off?'btn-green':'btn-red'}" style="font-size:11px;padding:3px 8px" onclick="toggleAccount('${a.uid}')">${off?'重新啟用':'停用'}</button>`}
+    </div>`;
+  }).join('');
+  const inv=_invites.map(i=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid #eee;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px"><div style="font-size:13px">${i.name||''} <span class="pill pill-amber" style="font-size:10px">等待對方登入</span></div><div style="font-size:11px;color:#999">${i.email}</div></div>
+      <span style="font-size:12px">${ROLE_LABEL[i.role]||i.role}</span>
+      <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="resendSetPassword('${i.email}')">寄設定密碼信</button>
+      <button class="btn btn-outline" style="font-size:11px;padding:3px 8px" onclick="cancelInvite('${i.email}')">取消邀請</button>
+    </div>`).join('');
+  document.getElementById('mod-body').innerHTML=`
+    <div style="font-size:13px;font-weight:500;margin-bottom:6px">新增人員</div>
+    <div class="fg"><div class="fr"><label>Email *</label><input type="email" id="acct-email" placeholder="name@holiway.com.tw"></div><div class="fr"><label>姓名 *</label><input type="text" id="acct-name" maxlength="40"></div></div>
+    <div class="fr"><label>角色</label><select id="acct-role"><option value="staff">行政</option><option value="coach">教練</option><option value="admin">管理者</option></select></div>
+    <div style="font-size:11px;color:#999;margin:-2px 0 8px">建立後系統會寄一封信到這個 Email，讓對方自己設定密碼。行政與教練目前仍可使用全部功能，分權限會在下一階段加上。</div>
+    <button class="btn btn-pink" style="width:100%" onclick="createAccount()">新增並寄出設定密碼信</button>
+    <div style="font-size:13px;font-weight:500;margin:16px 0 4px">目前帳號（${_accounts.filter(a=>a.active!==false).length} 位使用中）</div>
+    ${rows||'<div class="empty">沒有帳號</div>'}
+    ${_invites.length?`<div style="font-size:13px;font-weight:500;margin:16px 0 4px">已邀請、尚未登入</div>${inv}`:''}`;
+}
+
+async function createAccount(){
+  const email=(document.getElementById('acct-email').value||'').trim().toLowerCase();
+  const name=(document.getElementById('acct-name').value||'').trim();
+  const role=document.getElementById('acct-role').value;
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){alert('請輸入正確的 Email');return;}
+  if(!name){alert('請輸入姓名');return;}
+  if(_accounts.some(a=>(a.email||'').toLowerCase()===email)){alert('這個 Email 已經在名單中');return;}
+  const me=auth.currentUser?.email||'';
+  showLoading('建立帳號中…');
+  try{
+    const sec=secondaryAuth();
+    let uid=null;
+    try{
+      const cred=await sec.createUserWithEmailAndPassword(email,randomPassword());
+      uid=cred.user.uid;
+      await sec.signOut();
+    }catch(e){
+      if(e&&e.code==='auth/email-already-in-use'){
+        // 這個 Email 已經有 Firebase 帳號：改用邀請，對方下次登入時自動加入
+        await db.collection('invites').doc(email).set({email,name,role,createdBy:me,createdAt:new Date().toISOString()});
+        await auditNote('admins',email,`${name}（${email}）`,'create',[{f:'role',label:'邀請角色',from:'',to:ROLE_LABEL[role]}]);
+        hideLoading();
+        alert(`「${email}」原本就有帳號，已改為邀請。\n請對方用原本的密碼登入一次，就會自動加入名單。\n忘記密碼的話，可以在清單上按「寄設定密碼信」。`);
+        await loadAccounts(); return;
+      }
+      throw e;
+    }
+    await db.collection('admins').doc(uid).set({email,name,role,active:true,createdBy:me,createdAt:new Date().toISOString()});
+    await auditNote('admins',uid,`${name}（${email}）`,'create',[{f:'role',label:'角色',from:'',to:ROLE_LABEL[role]}]);
+    try{ await sendSetPasswordMail(email); }catch(e){ console.warn(e); }
+    hideLoading();
+    alert(`已建立「${name}」的帳號，設定密碼的信已寄到 ${email}。\n請對方收信設定密碼後，用這個 Email 登入。`);
+    await loadAccounts();
+  }catch(e){
+    hideLoading();
+    const msg={'auth/operation-not-allowed':'Firebase 尚未開放 Email／密碼登入或已關閉註冊，請到 Authentication → 登入方式確認。','auth/invalid-email':'Email 格式不正確。','permission-denied':'權限不足，請確認 Firebase 規則已更新到 v8.1.3。'}[e&&e.code];
+    alert('建立帳號失敗：'+(msg||(e&&e.message)||e));
+  }
+}
+
+async function setAccountRole(uid, role){
+  const a=_accounts.find(x=>x.uid===uid); if(!a||uid===myAccount.uid) return;
+  if(!confirm(`把「${a.name||a.email}」的角色從「${ROLE_LABEL[a.role||'admin']}」改成「${ROLE_LABEL[role]}」？`)){ renderAccounts(); return; }
+  try{
+    await db.collection('admins').doc(uid).set({email:a.email||'',name:a.name||'',role,active:a.active!==false,createdBy:a.createdBy||'',createdAt:a.createdAt||'',updatedBy:auth.currentUser?.email||'',updatedAt:new Date().toISOString()});
+    await auditNote('admins',uid,`${a.name||''}（${a.email||''}）`,'update',[{f:'role',label:'角色',from:ROLE_LABEL[a.role||'admin'],to:ROLE_LABEL[role]}]);
+    hint('角色已更新 ✓'); await loadAccounts();
+  }catch(e){ alert('更新失敗：'+(e&&e.message||e)); renderAccounts(); }
+}
+
+async function toggleAccount(uid){
+  const a=_accounts.find(x=>x.uid===uid); if(!a||uid===myAccount.uid) return;
+  const off=a.active===false;
+  if(!confirm(off?`重新啟用「${a.name||a.email}」？`:`停用「${a.name||a.email}」？\n停用後這個帳號就無法登入系統，過去的操作紀錄都會保留。`)) return;
+  try{
+    await db.collection('admins').doc(uid).set({email:a.email||'',name:a.name||'',role:a.role||'admin',active:off,createdBy:a.createdBy||'',createdAt:a.createdAt||'',updatedBy:auth.currentUser?.email||'',updatedAt:new Date().toISOString()});
+    await auditNote('admins',uid,`${a.name||''}（${a.email||''}）`,'update',[{f:'active',label:'狀態',from:off?'已停用':'使用中',to:off?'使用中':'已停用'}]);
+    hint(off?'已重新啟用 ✓':'已停用 ✓'); await loadAccounts();
+  }catch(e){ alert('更新失敗：'+(e&&e.message||e)); }
+}
+
+async function resendSetPassword(email){
+  if(!email) return;
+  if(!confirm(`寄一封設定密碼的信到 ${email}？`)) return;
+  try{ await sendSetPasswordMail(email); alert('已寄出，請對方到信箱（含垃圾郵件匣）查收。'); }
+  catch(e){ alert('寄送失敗：'+(e&&e.message||e)); }
+}
+
+async function cancelInvite(email){
+  if(!confirm(`取消對 ${email} 的邀請？`)) return;
+  try{ await db.collection('invites').doc(email).delete(); await auditNote('admins',email,email,'delete',[{f:'invite',label:'邀請',from:'待登入',to:'已取消'}]); await loadAccounts(); }
+  catch(e){ alert('取消失敗：'+(e&&e.message||e)); }
 }
 </script>
 </body>
