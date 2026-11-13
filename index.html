@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v8.2.1 BUILD 20261113-ROLES-ADJ -->
+<!-- HOLIWAY v8.2.2 BUILD 20261113-CONCURRENCY -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v8.2.1</title>
+<title>哈樂維 v8.2.2</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -231,7 +231,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.2.1</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.2.2</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -581,6 +581,7 @@ async function fsGet(col){
   return arr;
 }
 // ── 差異寫入（加上操作紀錄）：資料與紀錄放在同一批寫入，要嘛一起成功、要嘛都不寫 ──
+// ── 交易式寫入：每筆要修改或刪除的資料，先確認雲端版本跟我載入時一樣才寫入 ──
 async function fsSave(col, items) {
   const m = _snapOf(col);
   const byId = new Map();
@@ -589,22 +590,37 @@ async function fsSave(col, items) {
   byId.forEach((it, id) => { const s = _ser(it); if (m.get(id) !== s) ops.push({type:'set', id, s, it, prev:m.get(id)}); });
   m.forEach((prev, id) => { if (!byId.has(id)) ops.push({type:'del', id, prev}); });
   if (!ops.length) return;
+  const pre = await preSaveChecks(col, ops);
+  if (pre) await handleConflict(col, pre);
   const logIt = !AUDIT_SKIP.has(col);
-  const CHUNK = logIt ? 200 : 400;
+  const CHUNK = 150;
   for (let i = 0; i < ops.length; i += CHUNK) {
     const part = ops.slice(i, i + CHUNK);
-    const batch = db.batch();
-    part.forEach(op => {
-      const ref = db.collection(col).doc(op.id);
-      if (op.type === 'set') batch.set(ref, op.it); else batch.delete(ref);
-      if (logIt) {
-        let before=null; try{ before=op.prev?JSON.parse(op.prev):null; }catch(e){}
-        const action = op.type==='del' ? 'delete' : before ? 'update' : 'create';
-        const entry = auditEntry(col, op.id, action, before, op.type==='set'?JSON.parse(op.s):null);
-        if (action!=='update' || entry.changes.length) batch.set(db.collection(auditColFor(col)).doc(entry.id), entry);
-      }
+    let changed = [];
+    await db.runTransaction(async tx => {
+      changed = [];
+      const checks = part.filter(op => op.prev !== undefined);
+      const snaps = await Promise.all(checks.map(op => tx.get(db.collection(col).doc(op.id))));
+      snaps.forEach((s, k) => {
+        const cur = s.exists ? _ser({id: s.id, ...s.data()}) : null;
+        if (cur !== checks[k].prev) changed.push(checks[k]);
+      });
+      if (changed.length) return;
+      part.forEach(op => {
+        const ref = db.collection(col).doc(op.id);
+        if (op.type === 'set') tx.set(ref, op.it); else tx.delete(ref);
+        if (logIt) {
+          let before=null; try{ before=op.prev?JSON.parse(op.prev):null; }catch(e){}
+          const action = op.type==='del' ? 'delete' : before ? 'update' : 'create';
+          const entry = auditEntry(col, op.id, action, before, op.type==='set'?JSON.parse(op.s):null);
+          if (action!=='update' || entry.changes.length) tx.set(db.collection(auditColFor(col)).doc(entry.id), entry);
+        }
+      });
     });
-    await batch.commit();
+    if (changed.length) {
+      const names = changed.slice(0,3).map(op => { let d=null; try{d=JSON.parse(op.prev);}catch(e){} return auditDocLabel(col, d||{}, op.id); }).join('、');
+      await handleConflict(col, `「${names}」${changed.length>3?'等 '+changed.length+' 筆':''}剛剛被其他人修改或刪除了。`);
+    }
     part.forEach(op => { if (op.type === 'set') m.set(op.id, op.s); else m.delete(op.id); });
   }
   hint('已同步雲端 ✓');
@@ -668,6 +684,7 @@ let _saveErrShown = 0;
 async function saveCol(col,arr){
   try { stampCreator(col,arr); await fsSave(col,arr); }
   catch(e){
+    if (e && e.isConflict) throw e;   // 衝突已提示並重新載入，中止這次操作的後續步驟
     console.warn('saveCol error:',col,e);
     const el=document.getElementById('db-st');
     if(el){el.textContent='⚠ 儲存失敗';el.style.background='#FCEBEB';el.style.color='#501313';el.style.borderColor='#F09595';}
@@ -1859,7 +1876,7 @@ function ifSessChange(){
 function ifPrev(){if(!document.getElementById('if-amt')||!document.getElementById('if-prev'))return;const a=parseFloat(document.getElementById('if-amt').value)||0,d=parseFloat(document.getElementById('if-disc').value)||0;document.getElementById('if-prev').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">費用</span><span>${fmt(a)}</span></div>${d>0?`<div class="rrow"><span style="color:#999">折扣</span><span style="color:#A32D2D">-${fmt(d)}</span></div>`:''}<div class="rrow rtotal"><span>應繳</span><span>${fmt(a-d)}</span></div></div>`;}
 async function issueFee(){const stId=document.getElementById('if-stu').value,amt=parseFloat(document.getElementById('if-amt').value)||0,disc=parseFloat(document.getElementById('if-disc').value)||0;if(!stId||amt<=0){alert('請選擇學生並輸入金額');return;}const sessId=document.getElementById('if-sess').value||null;const termId=document.getElementById('if-term').value||null;const term=terms.find(t=>t.id===termId);const fee={id:'f'+Date.now(),studentId:stId,termId,sessionId:sessId,amount:amt,description:document.getElementById('if-note').value||'課程費用',dueDate:document.getElementById('if-due').value,issuedDate:today(),termStartDate:term?.startDate||null,termEndDate:term?.endDate||null};fees.push(fee);if(disc>0)txns.push({id:'t'+Date.now(),feeId:fee.id,studentId:stId,type:'disc',amount:disc,date:today(),method:'—',note:'開帳折扣'});await saveCol('fees',fees);await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
 function openPayMod(feeId){const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);document.getElementById('mod-title').textContent='收款 — '+st.name;document.getElementById('mod-body').innerHTML=`<div class="rbox"><div class="rrow"><span style="color:#999">應繳</span><span>${fmt(s.net)}</span></div><div class="rrow"><span style="color:#999">已繳</span><span style="color:#27500A">${fmt(s.paid)}</span></div><div class="rrow rtotal"><span>尚欠</span><span style="color:#A32D2D">${fmt(s.bal)}</span></div></div><div class="fg"><div class="fr"><label>收款金額</label><input type="number" id="pay-amt" value="${s.bal}" min="1"></div><div class="fr"><label>付款方式</label><select id="pay-meth"><option>現金</option><option>轉帳</option><option>LINE Pay</option><option>信用卡</option></select></div></div><div class="fg"><div class="fr"><label>日期</label><input type="date" id="pay-date" value="${today()}"></div><div class="fr"><label>備註</label><input type="text" id="pay-note"></div></div><button class="btn btn-green" style="width:100%" onclick="recordPay('${feeId}')">確認收款</button>`;document.getElementById('overlay').style.display='flex';}
-async function recordPay(feeId){const amt=parseFloat(document.getElementById('pay-amt').value)||0;if(amt<=0){alert('請輸入金額');return;}const f=fees.find(x=>x.id===feeId);txns.push({id:'t'+Date.now(),feeId,studentId:f?f.studentId:'',type:'pay',amount:amt,method:document.getElementById('pay-meth').value,date:document.getElementById('pay-date').value,note:document.getElementById('pay-note').value});await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
+async function recordPay(feeId){const amt=parseFloat(document.getElementById('pay-amt').value)||0;if(amt<=0){alert('請輸入金額');return;}if(!(await checkDuplicatePay(feeId,amt)))return;const f=fees.find(x=>x.id===feeId);txns.push({id:'t'+Date.now(),feeId,studentId:f?f.studentId:'',type:'pay',amount:amt,method:document.getElementById('pay-meth').value,date:document.getElementById('pay-date').value,note:document.getElementById('pay-note').value});await saveCol('txns',txns);closeMod();renderFee();renderStudents();renderDash();}
 function openRefundMod(feeId){
   const f=fees.find(x=>x.id===feeId);if(!f)return;const s=feeStatus(f);const st=getSt(f.studentId);
   if(s.paid<=0){alert('這張帳單尚未收款，沒有可退的金額。\n若要取消這張帳單，請直接刪除。');return;}
@@ -3211,6 +3228,8 @@ async function approveReg(pendingId) {
   if(already.length) notes.push(`已經報名：${already.map(s=>s.name).join('、')}，這些會略過。`);
   if(fullSess.length) notes.push(`${fullSess.map(s=>s.name).join('、')} 已滿班，將列為候補。`);
   if(notes.length&&!confirm(notes.join('\n')+'\n\n確定審核通過？')) return;
+  // v8.2.2：先鎖定這筆報名，避免兩人同時審核造成重複建檔
+  if(!(await claimPending(p,'approved'))) return;
   let st=existing;
   if(st){
     // 舊生：以這次填寫的最新資料更新聯絡方式與身高年齡
@@ -3237,11 +3256,10 @@ async function approveReg(pendingId) {
 }
 
 async function rejectReg(pendingId) {
-  if (!confirm('確認拒絕此報名？')) return;
-  // ⑥ 改為標記 rejected 保留記錄，避免資料永久消失
-  const p = pendingSubs.find(x=>x.id===pendingId);
-  if (p) { p.status = 'rejected'; p.rejectedAt = new Date().toLocaleString('zh-TW',{hour12:false}); }
-  await saveCol('pending', pendingSubs); renderRegQR();
+  const p = pendingSubs.find(x=>x.id===pendingId); if(!p) return;
+  if (!confirm(`確認拒絕「${p.childName}」的報名？`)) return;
+  if(!(await claimPending(p,'rejected'))) return;
+  renderRegQR(); hint('已拒絕');
 }
 
 function editPending(pendingId) {
@@ -7121,6 +7139,7 @@ async function executeRefund(f, r, req){
   await saveCol('fees',fees); await saveCol('txns',txns);
 }
 
+// ── 退費核准：先鎖定申請單，避免兩位管理者同時核准造成重複退款 ──
 async function approveRefund(reqId){
   const q=refundReqs.find(x=>x.id===reqId); if(!q||q.status!=='pending') return;
   const f=fees.find(x=>x.id===q.feeId);
@@ -7128,9 +7147,17 @@ async function approveRefund(reqId){
   const s=feeStatus(f);
   if(q.amount>s.paid){alert(`這張帳單目前已收款只有 ${fmt(s.paid)}，少於申請的退費 ${fmt(q.amount)}，請駁回後重新申請。`);return;}
   if(!confirm(`核准退費？\n${q.feeLabel}\n退費 ${fmt(q.amount)}（${q.mode==='void'?'退費並作廢帳單':'部分退費，帳單保留'}）\n原因：${q.reason}\n申請人：${q.requestedBy}`)) return;
-  await executeRefund(f,{amt:q.amount,reason:q.reason,mode:q.mode,date:today()},q);
-  const upd={...q,status:'approved',decidedBy:auth.currentUser?.email||'',decidedAt:new Date().toISOString()};
-  await db.collection('refundReqs').doc(q.id).set(upd); Object.assign(q,upd);
+  const me=auth.currentUser?.email||'';
+  const c=await claimDoc('refundReqs',q.id,'pending',{status:'approved',decidedBy:me,decidedAt:new Date().toISOString()});
+  if(!c.ok){ alert(`這筆退費申請已經被${c.data&&c.data.decidedBy?' '+c.data.decidedBy+' ':'其他人'}處理過了。`); await loadRefundReqs(); renderFee(); return; }
+  Object.assign(q,c.data);
+  try{
+    await executeRefund(f,{amt:q.amount,reason:q.reason,mode:q.mode,date:today()},q);
+  }catch(e){
+    // 退款沒有完成：把申請單改回待核准
+    try{ await db.collection('refundReqs').doc(q.id).set({...q,status:'pending',decidedBy:'',decidedAt:''}); q.status='pending'; }catch(e2){}
+    renderFee(); if(!(e&&e.isConflict)) alert('退費沒有完成：'+(e&&e.message||e)); return;
+  }
   await auditNote('refundReqs',q.id,q.feeLabel,'update',[{f:'status',label:'退費申請',from:'待核准',to:'已核准'}]);
   renderFee();renderStudents();renderDash();
   hint('已核准並完成退費 ✓');
@@ -7140,8 +7167,10 @@ async function rejectRefund(reqId){
   const q=refundReqs.find(x=>x.id===reqId); if(!q||q.status!=='pending') return;
   const why=prompt(`駁回退費申請（${q.feeLabel}，${fmt(q.amount)}）\n請輸入駁回原因：`,'');
   if(why===null) return;
-  const upd={...q,status:'rejected',decidedBy:auth.currentUser?.email||'',decidedAt:new Date().toISOString(),decisionNote:why.trim()};
-  await db.collection('refundReqs').doc(q.id).set(upd); Object.assign(q,upd);
+  const me=auth.currentUser?.email||'';
+  const c=await claimDoc('refundReqs',q.id,'pending',{status:'rejected',decidedBy:me,decidedAt:new Date().toISOString(),decisionNote:why.trim()});
+  if(!c.ok){ alert('這筆退費申請已經被其他人處理過了。'); await loadRefundReqs(); renderFee(); return; }
+  Object.assign(q,c.data);
   await auditNote('refundReqs',q.id,q.feeLabel,'update',[{f:'status',label:'退費申請',from:'待核准',to:'已駁回'+(why.trim()?'：'+why.trim():'')}]);
   renderFee();
   hint('已駁回退費申請');
@@ -7205,6 +7234,134 @@ async function saveAccountRoles(uid){
     await auditNote('admins',uid,`${a.name||''}（${a.email||''}）`,'update',[{f:'roles',label:'身份',from:before,to:rolesText(doc)}]);
     hint('身份已更新 ✓'); await openAccountMod();
   }catch(e){ alert('更新失敗：'+(e&&e.message||e)); }
+}
+
+// ══════════════════════════════════════════════════════
+// v8.2.2 多人同時操作：不覆蓋別人剛改過的資料、不重複報名與開帳、不超收
+// ══════════════════════════════════════════════════════
+class ConflictError extends Error { constructor(msg){ super(msg); this.isConflict=true; } }
+
+// 各資料表在畫面上對應的變數
+function setLocalCol(col, arr){
+  switch(col){
+    case 'fees': fees=arr; break;            case 'txns': txns=arr; break;
+    case 'enrolls': enrolls=arr; break;      case 'students': students=arr; break;
+    case 'terms': terms=arr; break;          case 'sessions': sessions=arr; break;
+    case 'makeup': makeupRec=arr; break;     case 'pending': pendingSubs=arr; break;
+    case 'coaches': coaches=arr; break;      case 'venues': venues=arr; break;
+    case 'pricing': pricing=arr; break;      case 'voucherPacks': voucherPacks=arr; break;
+    case 'multiSchedule': multiSchedule=arr; break; case 'voucherBookings': voucherBookings=arr; break;
+  }
+}
+
+async function refreshCol(col){ try{ setLocalCol(col, await fsGet(col)); }catch(e){ console.warn('refreshCol',col,e); } }
+
+function rerenderAll(){
+  ['renderDash','renderTerms','renderStudents','renderFee','renderSessions','renderMakeup','renderRegQR','renderSignin'].forEach(n=>{
+    try{ if(typeof window[n]==='function') window[n](); }catch(e){}
+  });
+}
+
+// 有衝突時：提示、重新載入這類資料、重畫畫面，並中止後續的儲存
+async function handleConflict(col, msg){
+  await refreshCol(col);
+  if(col==='enrolls'||col==='fees') { await refreshCol(col==='enrolls'?'fees':'enrolls'); }
+  rerenderAll();
+  alert(msg+'\n\n資料已重新載入，你這次的修改沒有存入，請確認後再操作一次。');
+  throw new ConflictError(msg);
+}
+
+async function queryIn(col, field, vals){
+  const out=[]; const uniq=[...new Set(vals.filter(v=>v!=null))];
+  for(let i=0;i<uniq.length;i+=10){
+    const snap=await db.collection(col).where(field,'in',uniq.slice(i,i+10)).get();
+    snap.docs.forEach(d=>out.push({id:d.id,...d.data()}));
+  }
+  return out;
+}
+
+const _activeEnroll=s=>['enrolled','waitlist','preregister'].includes(s);
+
+// 寫入前與雲端最新資料比對：重複報名、名額被搶、重複開帳
+async function preSaveChecks(col, ops){
+  const creates=ops.filter(o=>o.type==='set'&&o.prev===undefined).map(o=>o.it);
+  const m=_snapOf(col);
+  if(col==='enrolls'){
+    if(creates.length){
+      const srv=await queryIn('enrolls','studentId',creates.map(e=>e.studentId));
+      for(const e of creates){
+        const dup=srv.find(x=>x.id!==e.id&&!m.has(String(x.id))&&x.termId===e.termId&&x.sessionId===e.sessionId&&x.studentId===e.studentId&&_activeEnroll(x.status));
+        if(dup){ const s=getSess(e.sessionId); return `「${getSt(e.studentId).name}」剛剛已經被其他人加入「${s?s.name+' '+s.day+' '+s.time:''}」。`; }
+      }
+    }
+    const toEnrolled=ops.filter(o=>{ if(o.type!=='set'||o.it.status!=='enrolled') return false; let p=null; try{p=o.prev?JSON.parse(o.prev):null;}catch(e){} return !p||p.status!=='enrolled'; }).map(o=>o.it);
+    for(const tid of [...new Set(toEnrolled.map(e=>e.termId))]){
+      const srv=(await db.collection('enrolls').where('termId','==',tid).get()).docs.map(d=>({id:d.id,...d.data()}));
+      for(const e of toEnrolled.filter(x=>x.termId===tid)){
+        const s=getSess(e.sessionId); if(!s) continue;
+        const other=x=>x.id!==e.id&&x.sessionId===e.sessionId&&x.status==='enrolled';
+        const srvCnt=srv.filter(other).length, locCnt=enrolls.filter(other).length;
+        if(srvCnt>locCnt&&srvCnt>=s.capacity) return `「${s.name} ${s.day} ${s.time}」的名額剛剛被其他人用掉了（目前正取 ${srvCnt}／滿班 ${s.capacity}）。`;
+      }
+    }
+  }
+  if(col==='fees'&&creates.length){
+    const srv=await queryIn('fees','studentId',creates.map(f=>f.studentId));
+    for(const f of creates){
+      const sids=f.sessionId?[f.sessionId]:Array.isArray(f.courses)?f.courses.map(c=>c.sessId):[];
+      if(!sids.length||!f.termId) continue;
+      const dup=srv.find(x=>!m.has(String(x.id))&&x.studentId===f.studentId&&x.termId===f.termId&&x.status!=='void'&&sids.some(sid=>feeCoversSession(x,sid)));
+      if(dup) return `「${getSt(f.studentId).name}」的這門課剛剛已經被其他人開過帳單（${dup.description||''}）。`;
+    }
+  }
+  return null;
+}
+
+// 衝突造成的中止不再另外顯示錯誤
+window.addEventListener('unhandledrejection', e => { if (e.reason && e.reason.isConflict) e.preventDefault(); });
+
+// ── 搶先鎖定：審核報名、核准退費前，先確認還沒有人處理 ──
+async function claimDoc(col, id, expectStatus, patch){
+  const ref=db.collection(col).doc(id); let res={ok:false,data:null};
+  await db.runTransaction(async tx=>{
+    const s=await tx.get(ref); const d=s.exists?s.data():null;
+    if(!d||d.status!==expectStatus){ res={ok:false,data:d}; return; }
+    const nd={...d,...patch}; tx.set(ref,nd); res={ok:true,data:nd};
+  });
+  if(res.ok&&col==='pending') _snapOf(col).set(String(id),_ser({id,...res.data}));
+  return res;
+}
+
+const PENDING_STATUS={pending:'待審',approved:'已通過',rejected:'已拒絕'};
+
+async function claimPending(p, to){
+  const me=auth.currentUser?.email||'';
+  const patch=to==='approved'?{status:'approved',approvedBy:me,approvedAt:new Date().toLocaleString('zh-TW',{hour12:false})}:{status:'rejected',rejectedBy:me,rejectedAt:new Date().toLocaleString('zh-TW',{hour12:false})};
+  const r=await claimDoc('pending',p.id,'pending',patch);
+  if(!r.ok){
+    const who=r.data&&(r.data.approvedBy||r.data.rejectedBy);
+    alert(`「${p.childName}」的報名已經${who?'被 '+who+' ':'被其他人'}處理過了（目前狀態：${PENDING_STATUS[r.data&&r.data.status]||'已刪除'}）。`);
+    await refreshCol('pending'); try{renderRegQR();}catch(e){}
+    return false;
+  }
+  Object.assign(p,patch);
+  auditNote('pending',p.id,`${p.childName}（${p.parentName||''}）`,'update',[{f:'status',label:'狀態',from:'待審',to:PENDING_STATUS[to]}]);
+  return true;
+}
+
+// ── 重複收款提醒：同一張帳單 10 分鐘內已有相同金額的收款 ──
+async function checkDuplicatePay(feeId, amt){
+  try{
+    const since=Date.now()-10*60*1000;
+    const snap=await db.collection('txns').where('feeId','==',feeId).get();
+    const recent=snap.docs.map(d=>d.data()).filter(t=>t.type==='pay'&&Number(t.amount)===Number(amt)&&t.createdAt&&Date.parse(t.createdAt)>=since);
+    if(!recent.length) return true;
+    const r=recent[0];
+    if(!confirm(`這張帳單在 ${new Date(r.createdAt).toLocaleTimeString('zh-TW',{hour12:false})} 已經由 ${r.createdBy||'其他人'} 登記過一筆 ${fmt(r.amount)} 的收款。\n確定要再登記一筆嗎？`)){
+      await refreshCol('txns'); renderFee(); return false;
+    }
+  }catch(e){ console.warn('checkDuplicatePay',e); }
+  return true;
 }
 </script>
 </body>
