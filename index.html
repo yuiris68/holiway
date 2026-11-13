@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- HOLIWAY v8.1.3 BUILD 20261113-ACCOUNTS -->
+<!-- HOLIWAY v8.1.4 BUILD 20261113-PASSWORD -->
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="哈樂維">
-<title>哈樂維 v8.1.3</title>
+<title>哈樂維 v8.1.4</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -217,6 +217,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
       <input type="password" id="login-password" placeholder="輸入密碼" autocomplete="current-password">
     </div>
     <button class="login-btn" id="login-btn" onclick="doLogin()">登入</button>
+    <div style="text-align:center;margin-top:10px"><a href="javascript:void(0)" onclick="forgotPassword()" style="font-size:12px;color:#888;text-decoration:underline">忘記密碼？</a></div>
     <div class="login-err" id="login-err"></div>
   </div>
 </div>
@@ -230,7 +231,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
 <!-- APP -->
 <div id="app-screen">
   <div class="top-bar">
-    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.1.3</span></span></div>
+    <div class="logo">哈樂維運動倉庫<span>課程管理</span><span class="logo-sub">Haloway Sports Warehouse <span style="background:#1D9E75;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700">v8.1.4</span></span></div>
     <span class="db-badge" id="db-st">✓ Firebase 連線</span>
     <span class="sync-badge" id="sv"></span>
     <nav class="nav">
@@ -250,6 +251,7 @@ label{font-size:11px;color:#666;display:block;margin-bottom:2px}
       <span id="user-email" style="font-size:11px;color:#999"></span>
       <button class="nb" onclick="sw('reg-qr',this)" style="background:#E1F5EE;color:#085041;border-color:#1D9E75">報名QR<span id="pending-badge" style="display:none;margin-left:4px;background:#E24B4A;color:#fff;border-radius:8px;padding:0 6px;font-size:10px"></span></button>
     <button class="logout-btn" id="acct-btn" style="display:none" onclick="openAccountMod()" title="新增人員、設定角色、停用帳號">👥 帳號</button>
+    <button class="logout-btn" onclick="openChangePassword()" title="修改我的密碼">🔑 密碼</button>
     <button class="logout-btn" onclick="openAuditLog()" title="誰在什麼時候改了什麼">📋 紀錄</button>
     <button class="logout-btn" onclick="openBackupMod()" title="備份與還原">💾 備份</button>
     <button class="logout-btn" onclick="doLogout()">登出</button>
@@ -6871,6 +6873,68 @@ async function cancelInvite(email){
   if(!confirm(`取消對 ${email} 的邀請？`)) return;
   try{ await db.collection('invites').doc(email).delete(); await auditNote('admins',email,email,'delete',[{f:'invite',label:'邀請',from:'待登入',to:'已取消'}]); await loadAccounts(); }
   catch(e){ alert('取消失敗：'+(e&&e.message||e)); }
+}
+
+// ══════════════════════════════════════════════════════
+// v8.1.4 密碼：登入畫面「忘記密碼」、登入後自己修改密碼
+// ══════════════════════════════════════════════════════
+async function forgotPassword(){
+  const err=document.getElementById('login-err');
+  let email=(document.getElementById('login-email').value||'').trim();
+  if(!email){ email=(prompt('請輸入你的登入 Email，系統會寄一封重設密碼的信給你：','')||'').trim(); }
+  if(!email) return;
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ err.textContent='Email 格式不正確'; return; }
+  try{ auth.languageCode='zh-TW'; }catch(e){}
+  try{
+    await auth.sendPasswordResetEmail(email);
+  }catch(e){
+    if(e&&e.code==='auth/invalid-email'){ err.textContent='Email 格式不正確'; return; }
+    if(e&&e.code==='auth/too-many-requests'){ err.textContent='嘗試次數過多，請稍後再試'; return; }
+    // 其他情況（包含帳號不存在）都顯示同樣訊息，避免被拿來查詢哪些 Email 有帳號
+  }
+  err.style.color='#27500A';
+  err.textContent=`如果 ${email} 有帳號，重設密碼的信已經寄出，請到信箱（含垃圾郵件匣）查收。`;
+  setTimeout(()=>{ err.style.color=''; },8000);
+}
+
+function openChangePassword(){
+  document.getElementById('mod-title').textContent='修改我的密碼';
+  document.getElementById('mod-body').innerHTML=`
+    <div class="info-box">帳號：${auth.currentUser?.email||''}</div>
+    <div class="fr"><label>目前的密碼</label><input type="password" id="pw-old" autocomplete="current-password"></div>
+    <div class="fr"><label>新密碼（至少 8 碼）</label><input type="password" id="pw-new" autocomplete="new-password"></div>
+    <div class="fr"><label>再輸入一次新密碼</label><input type="password" id="pw-new2" autocomplete="new-password"></div>
+    <div id="pw-msg" style="font-size:12px;color:#A32D2D;min-height:18px;margin-bottom:6px"></div>
+    <button class="btn btn-pink" style="width:100%" onclick="changeMyPassword()">確認修改</button>
+    <div style="font-size:11px;color:#999;margin-top:8px">忘記目前的密碼？請登出後在登入畫面按「忘記密碼」。</div>`;
+  document.getElementById('overlay').style.display='flex';
+}
+
+async function changeMyPassword(){
+  const msg=document.getElementById('pw-msg');
+  const oldPw=document.getElementById('pw-old').value, pw=document.getElementById('pw-new').value, pw2=document.getElementById('pw-new2').value;
+  msg.textContent='';
+  if(!oldPw){ msg.textContent='請輸入目前的密碼'; return; }
+  if(pw.length<8){ msg.textContent='新密碼至少要 8 碼'; return; }
+  if(pw!==pw2){ msg.textContent='兩次輸入的新密碼不一樣'; return; }
+  if(pw===oldPw){ msg.textContent='新密碼不能跟目前的密碼相同'; return; }
+  const user=auth.currentUser; if(!user) return;
+  showLoading('修改密碼中…');
+  try{
+    const cred=firebase.auth.EmailAuthProvider.credential(user.email,oldPw);
+    await user.reauthenticateWithCredential(cred);
+    await user.updatePassword(pw);
+    await auditNote('admins',user.uid,`${myAccount?.name||''}（${user.email}）`,'update',[{f:'password',label:'密碼',from:'',to:'已由本人修改'}]);
+    hideLoading(); closeMod();
+    alert('密碼已修改，下次登入請使用新密碼。');
+  }catch(e){
+    hideLoading();
+    const c=e&&e.code;
+    msg.textContent=(c==='auth/wrong-password'||c==='auth/invalid-credential'||c==='auth/invalid-login-credentials')?'目前的密碼不正確'
+      :c==='auth/weak-password'?'新密碼太簡單，請換一組'
+      :c==='auth/too-many-requests'?'嘗試次數過多，請稍後再試'
+      :'修改失敗：'+((e&&e.message)||e);
+  }
 }
 </script>
 </body>
